@@ -1,0 +1,25 @@
+{
+    "name": "linkedin-sales-extension",
+    "version": "1.0.0",
+    "scripts": {
+        "build": "webpack --mode=production",
+        "dev": "webpack --mode=development --watch"
+    },
+    "devDependencies": {
+        "@types/chrome": "^0.0.246",
+        "@types/react": "^18.2.37",
+        "@types/react-dom": "^18.2.15",
+        "copy-webpack-plugin": "^14.0.0",
+        "css-loader": "^6.8.1",
+        "html-webpack-plugin": "^5.5.3",
+        "style-loader": "^3.3.3",
+        "ts-loader": "^9.5.1",
+        "typescript": "^5.2.2",
+        "webpack": "^5.88.2",
+        "webpack-cli": "^5.1.4"
+    },
+    "dependencies": {
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
+    }
+}
