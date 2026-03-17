@@ -15,7 +15,13 @@ interface ContactData {
     services: string;
     email?: string;
     phone?: string;
+    phoneSource?: string;
+    phoneConfidence?: 'high' | 'low';
+    emailSource?: string;
+    emailConfidence?: 'high' | 'low';
 }
+
+import { performEnrichment } from './enrichment';
 
 const Sidebar: React.FC = () => {
     const [isVisible, setIsVisible] = useState(false);
@@ -128,7 +134,11 @@ const Sidebar: React.FC = () => {
             return {
                 ...currentContact,
                 email: prev.email || currentContact.email,
-                phone: prev.phone || currentContact.phone
+                phone: prev.phone || currentContact.phone,
+                phoneSource: prev.phoneSource,
+                phoneConfidence: prev.phoneConfidence,
+                emailSource: prev.emailSource,
+                emailConfidence: prev.emailConfidence
             };
         });
     };
@@ -190,17 +200,53 @@ const Sidebar: React.FC = () => {
         setLoadingEnrich(true);
         const results = await scrapeContactInfo();
         
+        let finalEmail = results.email;
+        let emailSource = '';
+        let emailConfidence: 'high' | 'low' = 'high';
+
+        let finalPhone = results.phone;
+        let phoneSource = '';
+        let phoneConfidence: 'high' | 'low' = 'high';
+
+        // Trigger Enrichment if LinkedIn returns "Not available"
+        if (type === 'email' && finalEmail === "Not available") {
+            showToast('Searching portfolio & 2-3 external links...', 'success');
+            const enrichment = await performEnrichment('email');
+            if (enrichment && enrichment.email) {
+                finalEmail = enrichment.email;
+                emailSource = enrichment.sourceType;
+                emailConfidence = enrichment.confidence;
+            }
+        }
+
+        if (type === 'phone' && finalPhone === "Not available") {
+            showToast('Searching portfolio & 2-3 external links...', 'success');
+            const enrichment = await performEnrichment('phone');
+            if (enrichment && enrichment.phone) {
+                finalPhone = enrichment.phone;
+                phoneSource = enrichment.sourceType;
+                phoneConfidence = enrichment.confidence;
+            }
+        }
+
         setContact(prev => {
             if (!prev) return null;
             return {
                 ...prev,
-                email: results.email !== "Not available" ? results.email : (prev.email || "Not available"),
-                phone: results.phone !== "Not available" ? results.phone : (prev.phone || "Not available")
+                email: type === 'email' ? (finalEmail !== "Not available" ? finalEmail : (prev.email || "Not available")) : prev.email,
+                phone: type === 'phone' ? (finalPhone !== "Not available" ? finalPhone : (prev.phone || "Not available")) : prev.phone,
+                phoneSource: type === 'phone' ? (phoneSource || prev.phoneSource) : prev.phoneSource,
+                phoneConfidence: type === 'phone' ? (phoneConfidence || prev.phoneConfidence) : prev.phoneConfidence,
+                emailSource: type === 'email' ? (emailSource || prev.emailSource) : prev.emailSource,
+                emailConfidence: type === 'email' ? (emailConfidence || prev.emailConfidence) : prev.emailConfidence
             };
         });
 
-        if ((type === 'email' && results.email !== "Not available") || (type === 'phone' && results.phone !== "Not available")) {
-            showToast(`${type === 'email' ? 'Email' : 'Phone'} Scraped!`, 'success');
+        const found = type === 'email' ? finalEmail !== "Not available" : finalPhone !== "Not available";
+        const currentSource = type === 'email' ? emailSource : phoneSource;
+
+        if (found) {
+            showToast(`${type === 'email' ? 'Email' : 'Phone'} Scraped! ${currentSource ? 'via ' + currentSource : ''}`, 'success');
         } else {
             showToast(`${type === 'email' ? 'Email' : 'Phone'} not found`, 'error');
         }
@@ -228,6 +274,8 @@ const Sidebar: React.FC = () => {
                 services: contact.services,
                 email: contact.email || 'Not available on LinkedIn',
                 phone: contact.phone || 'Not available on LinkedIn',
+                email_source: contact.emailSource || '',
+                phone_source: contact.phoneSource || '',
                 list_name: listToUse,
                 date_added: new Date().toISOString(),
                 lists: [{ name: listToUse }]
@@ -330,17 +378,23 @@ const Sidebar: React.FC = () => {
                     <div style={{ marginBottom: 20 }}>
                         <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', marginBottom: 8 }}>Email</p>
                         {contact?.email && contact.email !== 'Not available' && contact.email !== 'Not available on LinkedIn' ? (
-                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>{contact.email}</div>
+                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>
+                                {contact.email}{contact.emailConfidence === 'low' ? '?' : ''}
+                                {contact.emailSource && <div style={{ fontSize: '9px', color: '#0369A1', marginTop: '4px', fontWeight: '400' }}>via {contact.emailSource}</div>}
+                            </div>
                         ) : (
-                            <button onClick={() => enrichData('email')} disabled={loadingEnrich} style={{ width: '100%', padding: '12px', background: '#fff', border: '1px solid #ddd', borderRadius: '10px', fontWeight: '800' }}>{loadingEnrich ? 'Extracting...' : 'Access Email'}</button>
+                            <button onClick={() => enrichData('email')} disabled={loadingEnrich} style={{ width: '100%', padding: '12px', background: '#fff', border: '1px solid #ddd', borderRadius: '10px', fontWeight: '800' }}>{loadingEnrich ? 'Searching...' : 'Gmail Access'}</button>
                         )}
                     </div>
                     <div>
                         <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', marginBottom: 8 }}>Phone numbers</p>
                         {contact?.phone && contact.phone !== 'Not available' && contact.phone !== 'Not available on LinkedIn' ? (
-                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>{contact.phone}</div>
+                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>
+                                {contact.phone}{contact.phoneConfidence === 'low' ? '?' : ''}
+                                {contact.phoneSource && <div style={{ fontSize: '9px', color: '#0369A1', marginTop: '4px', fontWeight: '400' }}>via {contact.phoneSource}</div>}
+                            </div>
                         ) : (
-                            <button onClick={() => enrichData('phone')} disabled={loadingEnrich} style={{ width: '100%', padding: '12px', background: '#fff', border: '1px solid #ddd', borderRadius: '10px', fontWeight: '800' }}>{loadingEnrich ? 'Extracting...' : 'Access Phone'}</button>
+                            <button onClick={() => enrichData('phone')} disabled={loadingEnrich} style={{ width: '100%', padding: '12px', background: '#fff', border: '1px solid #ddd', borderRadius: '10px', fontWeight: '800' }}>{loadingEnrich ? 'Searching...' : 'Access Phone'}</button>
                         )}
                     </div>
                 </div>

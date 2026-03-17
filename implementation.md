@@ -6,7 +6,7 @@
    - `Access Email` & `Access Phone` buttons.
    - **Order**:
      - Auto-trigger LinkedIn "Contact Info" modal and extract email and phone number.
-     - Scan "About" "Experience" "Education" "services" sections and show the    summary list under the name section of extension like short text of these  options and if i do save contact then all these info will save in my  dashboard page people section columns.
+     - Scan "About" "Experience" "Education" "services" sections and show the summary list under the name section of extension like short text of these  options and if i do save contact then all these info will save in my  dashboard page people section columns.
      - Don't use the dummy data in the extension of access email and mobile number.
      - Fallback: Show "Not available" status for email or phone number.
 3. **Action Buttons**: 
@@ -17,9 +17,9 @@
    
 ## Dashboard Steps:
 1. **Enhanced Profiles View**:
-   - Table columns: Photo, Name, Headline, Email, Phone, Company + Website, Location.
+   - Table columns: Name, Headline, Email, Phone, Company + Website, Location.
 2. **Companies Module**: Show linked companies with full details.
-3. **Apollo.io Detail Panel**: 
+3. **Extension Detail Panel**: 
    - Side-panel for Profile/List/Company clicks.
    - Full display of all extracted data.
 4. **UI of dashboard**:

@@ -11,7 +11,8 @@
     "host_permissions": [
         "https://www.linkedin.com/*",
         "https://api.apollo.io/*",
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "<all_urls>"
     ],
     "background": {
         "service_worker": "background.js"

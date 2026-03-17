@@ -37,6 +37,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true; 
     }
 
+    if (request.action === 'FETCH_EXTERNAL_URL') {
+        fetch(request.url)
+            .then(res => res.text())
+            .then(html => sendResponse({ html }))
+            .catch(err => {
+                console.error('External fetch error:', err);
+                sendResponse({ error: err.message });
+            });
+        return true;
+    }
+
     if (request.action === 'enrich') {
         // ... existing enrich logic
         setTimeout(() => {
