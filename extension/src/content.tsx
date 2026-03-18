@@ -22,6 +22,8 @@ interface ContactData {
 }
 
 import { performEnrichment } from './enrichment';
+import { generateEmailPatterns, findCompanyDomain, getFirstLastName } from './emailPatternGenerator';
+import { verifyEmailsBatch } from './smtpClient';
 
 const Sidebar: React.FC = () => {
     const [isVisible, setIsVisible] = useState(false);
@@ -32,8 +34,14 @@ const Sidebar: React.FC = () => {
     const [showAddListInput, setShowAddListInput] = useState(false);
     const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
     const [isSaved, setIsSaved] = useState(false);
+    const [smtpOffline, setSmtpOffline] = useState(false);
 
     useEffect(() => {
+        // Check SMTP server status
+        fetch('http://localhost:8001/verify', { method: 'OPTIONS' })
+            .then(() => setSmtpOffline(false))
+            .catch(() => setSmtpOffline(true));
+
         const messageListener = (message: any) => {
             if (message.action === 'TOGGLE_SIDEBAR') {
                 setIsVisible(prev => !prev);
@@ -143,9 +151,10 @@ const Sidebar: React.FC = () => {
         });
     };
 
-    const scrapeContactInfo = async (): Promise<{ email: string, phone: string }> => {
+    const scrapeContactInfo = async (): Promise<{ email: string, phone: string, links: string[] }> => {
         let email = "Not available";
         let phone = "Not available";
+        let links: string[] = [];
 
         const waitForElement = (selector: string, timeout = 5000): Promise<Element | null> => {
             return new Promise((resolve) => {
@@ -170,7 +179,13 @@ const Sidebar: React.FC = () => {
                 if (modal) {
                     await new Promise(r => setTimeout(r, 1000));
 
-                    // REVERTED TO PRECISE SELECTORS (AS REQUESTED)
+                    // Extract External Links BEFORE closing
+                    const modalAnchors = modal.querySelectorAll('a[href^="http"]');
+                    modalAnchors.forEach(el => {
+                        const href = (el as HTMLAnchorElement).href;
+                        if (href && !href.includes('linkedin.com')) links.push(href);
+                    });
+
                     const emailAnchor = modal.querySelector('a[href^="mailto:"]');
                     if (emailAnchor) {
                         email = emailAnchor.textContent?.trim() || "Not available";
@@ -192,7 +207,7 @@ const Sidebar: React.FC = () => {
         } catch (e) {
             console.error("Scraper Error:", e);
         }
-        return { email, phone };
+        return { email, phone, links };
     };
 
     const enrichData = async (type: 'email' | 'phone') => {
@@ -210,18 +225,66 @@ const Sidebar: React.FC = () => {
 
         // Trigger Enrichment if LinkedIn returns "Not available"
         if (type === 'email' && finalEmail === "Not available") {
-            showToast('Searching portfolio & 2-3 external links...', 'success');
-            const enrichment = await performEnrichment('email');
+            showToast('Searching portfolio & company websites...', 'success');
+            
+            // 1. Get initial links from modal/page
+            const currentLinks = [...results.links];
+            
+            // 2. find company domain
+            const companyDomain = await findCompanyDomain(contact.company);
+            if (companyDomain) {
+                const companyUrl = `https://${companyDomain}`;
+                if (!currentLinks.some(l => l.includes(companyDomain))) {
+                    currentLinks.push(companyUrl);
+                }
+            }
+
+            // 3. Perform deep enrichment on all links Found
+            const enrichment = await performEnrichment('email', currentLinks);
             if (enrichment && enrichment.email) {
                 finalEmail = enrichment.email;
                 emailSource = enrichment.sourceType;
                 emailConfidence = enrichment.confidence;
+            } else if (companyDomain) {
+                // FALLBACK: Pattern Generator + SMTP Verifier
+                showToast('Attempting Pattern-based SMTP verification...', 'success');
+                try {
+                    const { first, last } = getFirstLastName(contact.fullName);
+                    const patterns = generateEmailPatterns(first, last, companyDomain);
+                    const verifyResults = await verifyEmailsBatch(patterns);
+                    
+                    // Find first valid or unknown
+                    const best = verifyResults.find(r => r.status === 'valid') || verifyResults.find(r => r.status === 'unknown');
+                    if (best) {
+                        finalEmail = best.email;
+                        emailSource = 'Pattern+SMTP';
+                        emailConfidence = best.status === 'valid' ? 'high' : 'low';
+                        setSmtpOffline(false);
+                    }
+                } catch (e) {
+                    if ((e as Error).message === 'SMTP_OFFLINE') {
+                        setSmtpOffline(true);
+                    }
+                }
             }
         }
 
         if (type === 'phone' && finalPhone === "Not available") {
-            showToast('Searching portfolio & 2-3 external links...', 'success');
-            const enrichment = await performEnrichment('phone');
+            showToast('Searching portfolio & company websites...', 'success');
+            
+            // 1. Get initial links from modal/page
+            const currentLinks = [...results.links];
+            
+            // 2. Proactively find company domain
+            const companyDomain = await findCompanyDomain(contact.company);
+            if (companyDomain) {
+                const companyUrl = `https://${companyDomain}`;
+                if (!currentLinks.some(l => l.includes(companyDomain))) {
+                    currentLinks.push(companyUrl);
+                }
+            }
+
+            const enrichment = await performEnrichment('phone', currentLinks);
             if (enrichment && enrichment.phone) {
                 finalPhone = enrichment.phone;
                 phoneSource = enrichment.sourceType;
@@ -376,10 +439,14 @@ const Sidebar: React.FC = () => {
 
                     <h3 style={{ fontSize: 16, fontWeight: '700', marginBottom: 16 }}>Contact information</h3>
                     <div style={{ marginBottom: 20 }}>
-                        <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', marginBottom: 8 }}>Email</p>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', margin: 0 }}>Email</p>
+                            {smtpOffline && <span style={{ fontSize: '9px', background: '#FEE2E2', color: '#B91C1C', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>SMTP OFFLINE</span>}
+                        </div>
                         {contact?.email && contact.email !== 'Not available' && contact.email !== 'Not available on LinkedIn' ? (
-                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>
+                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700', position: 'relative' }}>
                                 {contact.email}{contact.emailConfidence === 'low' ? '?' : ''}
+                                {contact.emailSource === 'Pattern+SMTP' && <span style={{ marginLeft: '8px', fontSize: '9px', background: contact.emailConfidence === 'high' ? '#DCFCE7' : '#FEF9C3', color: contact.emailConfidence === 'high' ? '#166534' : '#854d0e', padding: '2px 6px', borderRadius: '4px' }}>{contact.emailConfidence === 'high' ? 'VALID' : 'PROBABLE'}</span>}
                                 {contact.emailSource && <div style={{ fontSize: '9px', color: '#0369A1', marginTop: '4px', fontWeight: '400' }}>via {contact.emailSource}</div>}
                             </div>
                         ) : (
