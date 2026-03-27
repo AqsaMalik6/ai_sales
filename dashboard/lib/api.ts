@@ -40,18 +40,28 @@ export interface Company {
 if (typeof window !== 'undefined') {
     window.addEventListener('message', (event) => {
         if (event.data && event.data.type === 'SYNC_FROM_EXTENSION') {
-            console.log('Received data from extension:', event.data.data);
-            localStorage.setItem('local_contacts', JSON.stringify(event.data.data));
-            // Trigger a custom event to notify components
-            window.dispatchEvent(new Event('contacts-updated'));
+            console.log('--- DASHBOARD SYNC RECEIVED ---', event.data.data.length, 'contacts');
+            try {
+                localStorage.setItem('local_contacts', JSON.stringify(event.data.data));
+                window.dispatchEvent(new Event('contacts-updated'));
+            } catch (e) {
+                console.error('Failed to update dashboard storage:', e);
+            }
         }
     });
 }
 
 export async function getContacts(): Promise<Contact[]> {
     if (typeof window === 'undefined') return [];
-    const stored = localStorage.getItem('local_contacts');
-    return stored ? JSON.parse(stored) : [];
+    try {
+        const stored = localStorage.getItem('local_contacts');
+        if (!stored) return [];
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        console.error("Dashboard Storage Error:", e);
+        return [];
+    }
 }
 
 export async function getLists(): Promise<List[]> {

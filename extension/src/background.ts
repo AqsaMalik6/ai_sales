@@ -38,7 +38,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'FETCH_EXTERNAL_URL') {
-        fetch(request.url)
+        fetch(request.url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Referer': 'https://www.linkedin.com/'
+            }
+        })
             .then(res => res.text())
             .then(html => sendResponse({ html }))
             .catch(err => {
@@ -49,62 +55,70 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'SEARCH_DOMAIN') {
-        const query = encodeURIComponent(`site:linkedin.com/company/${request.companyName}`);
+        const query = encodeURIComponent(`${request.companyName} official website`);
         const searchUrl = `https://www.google.com/search?q=${query}`;
 
         fetch(searchUrl)
             .then(res => res.text())
             .then(html => {
-                // Look specifically for the company URL in Google results
-                // We ignore common related links or ads by looking for the specific pattern
-                const companyPageRegex = /https:\/\/www\.linkedin\.com\/company\/([a-zA-Z0-9-]+)(?:\/|\?|")/g;
-                let match;
-                while ((match = companyPageRegex.exec(html)) !== null) {
-                    const slug = match[1];
-                    // Skip common junk domains found in search results
-                    if (!['centrox', 'sales-intelligence', 'google', 'linkedin'].includes(slug.toLowerCase())) {
-                        const companyUrl = `https://www.linkedin.com/company/${slug}/about/`;
-                        return fetch(companyUrl).then(res => res.text());
-                    }
-                }
-                return null;
-            })
-                if (companyHtml) {
-                    // Extract website from about page
-                    // We look for URLs but exclude LinkedIn, Google, and other common internal/tracking hosts
-                    const urlMatches = companyHtml.matchAll(/https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g);
-                    const excludedDomains = ['linkedin.com', 'google.com', 'gstatic.com', 'microsoft.com', 'bing.com'];
-                    
-                    for (const match of urlMatches) {
-                        try {
-                            const url = match[0];
-                            const hostname = new URL(url).hostname.replace('www.', '').toLowerCase();
-                            
-                            // Ensure it's not a LinkedIn internal link and not a major search engine
-                            if (hostname && !excludedDomains.some(d => hostname.includes(d)) && hostname.includes('.')) {
-                                sendResponse({ domain: hostname });
-                                return;
-                            }
-                        } catch (e) {}
-                    }
+                const matches = html.matchAll(/<a href="\/url\?q=(https?:\/\/[^&]+)/g);
+                for (const match of matches) {
+                    try {
+                        const url = decodeURIComponent(match[1]);
+                        const domain = new URL(url).hostname.replace('www.', '');
+                        const blacklist = ['google.com', 'linkedin.com', 'facebook.com', 'twitter.com', 'w3.org', 'schema.org'];
+                        if (!blacklist.some(b => domain.includes(b))) {
+                            sendResponse({ domain });
+                            return;
+                        }
+                    } catch (e) {}
                 }
                 sendResponse({ domain: null });
+            })
             .catch(err => {
-                console.error('Search domain error:', err);
                 sendResponse({ domain: null });
             });
         return true;
     }
 
-    if (request.action === 'enrich') {
-        // ... existing enrich logic
-        setTimeout(() => {
-            sendResponse({
-                email: null,
-                phone: null,
-                isMock: false
+    if (request.action === 'CHECK_SMTP_STATUS') {
+        const hosts = ['localhost', '127.0.0.1'];
+        const check = async () => {
+            for (const host of hosts) {
+                try {
+                    const res = await fetch(`http://${host}:8001/verify`, { method: 'OPTIONS' });
+                    if (res.ok || res.status === 200) return true;
+                } catch (e) {}
+            }
+            return false;
+        };
+        check().then(online => sendResponse({ online }));
+        return true;
+    }
+
+    if (request.action === 'VERIFY_EMAILS') {
+        fetch('http://localhost:8001/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ emails: request.emails })
+        })
+            .then(res => res.json())
+            .then(data => sendResponse(data))
+            .catch(err => sendResponse({ error: 'OFFLINE' }));
+        return true;
+    }
+
+    if (request.action === 'FORCE_DASHBOARD_SYNC') {
+        chrome.tabs.query({}, (tabs) => {
+            tabs.forEach(tab => {
+                const isDashboard = tab.url && (tab.url.includes('localhost:3000') || tab.url.includes('127.0.0.1:3000'));
+                const isLinkedIn = tab.url && tab.url.includes('linkedin.com/in/');
+                if (tab.id && (isDashboard || isLinkedIn)) {
+                    chrome.tabs.sendMessage(tab.id, { action: 'SYNC_FROM_EXTENSION', data: request.data }).catch(() => {});
+                }
             });
-        }, 300);
+        });
+        sendResponse({ success: true });
         return true;
     }
 });

@@ -94,11 +94,6 @@ export default function PeoplePage() {
                                         👤 Name {sortField === 'full_name' && (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                                     </div>
                                 </th>
-                                <th className="px-6 py-4 cursor-pointer hover:text-primary transition-colors" onClick={() => handleSort('job_title')}>
-                                    <div className="flex items-center gap-2">
-                                        🎓 Job Title {sortField === 'job_title' && (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                                    </div>
-                                </th>
                                 <th className="px-6 py-4 cursor-pointer hover:text-primary transition-colors" onClick={() => handleSort('company')}>
                                     <div className="flex items-center gap-2">
                                         🏢 Company {sortField === 'company' && (sortOrder === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
@@ -146,7 +141,6 @@ export default function PeoplePage() {
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-secondary/80 font-medium">{contact.job_title}</td>
                                     <td className="px-6 py-4">
                                         <div className="flex items-center gap-2">
                                             <div className="w-6 h-6 bg-border rounded flex items-center justify-center shrink-0">

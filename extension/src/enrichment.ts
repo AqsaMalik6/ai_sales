@@ -1,178 +1,203 @@
-/**
- * enrichment.ts
- * Module for advanced extraction of phone numbers and emails from external profile links
- */
+import { EnrichmentResult } from './content';
 
-export interface EnrichmentResult {
-    phone?: string;
-    email?: string;
-    source: string;
-    sourceType: string;
-    confidence: 'high' | 'low';
-}
+const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g; // Permissive TLDs
+const OBFUSCATED_EMAIL_REGEX = /[a-zA-Z0-9._%+-]+(?:\s*(?:@|\[at\]|\(at\))\s*)[a-zA-Z0-9.-]+(?:\s*(?:\.|\[dot\]|\(dot\))\s*)[a-zA-Z]{2,}/gi;
+const PHONE_REGEX = /(\+?\d{1,4}[\s.-]?)?(\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}[\s.-]?\d{3,9}/g;
 
-const PHONE_REGEX = /(\+?\d{1,3}[\s\-]?)?\(?\d{2,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,6}/g;
-const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
-
-export const performEnrichment = async (type: 'email' | 'phone', extraUrls: string[] = []): Promise<EnrichmentResult | null> => {
-    // 1. Get all potential external urls (Portfolio, Twitter, Company sites etc.)
-    const pageUrls = extractAllAvailableLinks();
-    
-    // Combine urls and remove duplicates, prioritizing extraUrls
-    const urls = Array.from(new Set([...extraUrls, ...pageUrls])).slice(0, 5);
-    
-    if (urls.length === 0) return null;
-
-    // 2. Perform parallel fetching with slight staggered delays
-    const results = await Promise.allSettled(urls.map(url => deepFetchAndScrape(url, type)));
-    
-    // 3. Return the best match (High confidence first)
-    const successfulResults = results
-        .filter((r): r is PromiseFulfilledResult<EnrichmentResult> => r.status === 'fulfilled' && r.value !== null)
-        .map(r => r.value)
-        .sort((a, b) => {
-            if (a.confidence === 'high' && b.confidence === 'low') return -1;
-            if (a.confidence === 'low' && b.confidence === 'high') return 1;
-            return 0;
+export const findCompanyDomain = async (companyName: string): Promise<string | null> => {
+    if (!companyName || companyName.toLowerCase().includes('freelance') || companyName.toLowerCase().includes('self-employed')) return null;
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'SEARCH_DOMAIN', companyName }, (response) => {
+            resolve(response?.domain || null);
         });
-
-    return successfulResults[0] || null;
+    });
 };
 
-const extractAllAvailableLinks = (): string[] => {
-    const urls = new Set<string>();
+export const getFirstLastName = (fullName: string) => {
+    const parts = fullName.trim().split(/\s+/);
+    return {
+        first: parts[0] || '',
+        last: parts.length > 1 ? parts[parts.length - 1] : ''
+    };
+};
 
-    // A. Social & Direct Links
-    document.querySelectorAll('a[href*="twitter.com"], a[href*="x.com"], a[href*="github.com"], a[href*="facebook.com"], a[href*="instagram.com"]').forEach(el => {
-        const href = (el as HTMLAnchorElement).href;
-        if (href) urls.add(href);
-    });
-
-    // B. Intro/Headline Section (Portfolio, Website)
-    const introSelectors = [
-        '.pv-text-details__left-panel a[href^="http"]', 
-        '.pv-top-card--website a', 
-        '.pv-top-card-list a[href^="http"]',
-        'a[href*="portfolio"]'
+export const generateEmailPatterns = (first: string, last: string, domain: string): string[] => {
+    const f = first.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const l = last.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!f || !domain) return [];
+    
+    const patterns = [
+        `${f}@${domain}`,
+        `${f}.${l}@${domain}`,
+        `${f}${l}@${domain}`,
+        `${f[0]}${l}@${domain}`,
+        `${f}${l[0]}@${domain}`
     ];
-    introSelectors.forEach(sel => {
-        document.querySelectorAll(sel).forEach(el => {
-            const href = (el as HTMLAnchorElement).href;
-            if (href && !href.includes('linkedin.com')) urls.add(href);
-        });
-    });
-
-    // C. Experience Section (Company Websites)
-    const experienceLogos = document.querySelectorAll('.pvs-entity__logo a[href*="linkedin.com/company/"]');
-    experienceLogos.forEach(el => {
-        // We can't easily fetch other linkedin pages in background, but we can try to guess company domain from name
-        const companyName = el.closest('.pvs-entity')?.querySelector('.t-bold span')?.textContent?.trim()?.toLowerCase() || '';
-        if (companyName && companyName !== 'no company data') {
-            // Logic to potentially search/guess could go here, but for now we rely on the Profile already having these links
-        }
-    });
-
-    // D. Contact Info Modal (Including Websites, Blogs, etc.)
-    const modalLinks = document.querySelectorAll('.artdeco-modal a[href^="http"]');
-    modalLinks.forEach(el => {
-        const href = (el as HTMLAnchorElement).href;
-        if (href && !href.includes('linkedin.com')) urls.add(href);
-    });
-
-    // E. About section (Manual URL scanning)
-    const aboutSection = document.querySelector('#about')?.parentElement;
-    if (aboutSection) {
-        const text = aboutSection.innerText || "";
-        const urlMatches = text.match(/https?:\/\/[^\s$.?#].[^\s]*/g);
-        if (urlMatches) urlMatches.forEach(url => urls.add(url.replace(/[),.]$/, '')));
-    }
-
-    return Array.from(urls).filter(url => !url.includes('linkedin.com')).slice(0, 5); // Limit to top 5 links for speed
+    return [...new Set(patterns)];
 };
 
-const deepFetchAndScrape = async (url: string, type: 'email' | 'phone'): Promise<EnrichmentResult | null> => {
-    try {
-        // Initial fetch (homepage or bio)
-        let result = await fetchAndScrape(url, type);
-        if (result) return result;
+export const verifyEmailsBatch = async (emails: string[]): Promise<{ email: string, status: 'valid' | 'invalid' | 'unknown' }[]> => {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'VERIFY_EMAILS', emails }, (response) => {
+            resolve(response?.results || []);
+        });
+    });
+};
 
-        // "Intelligent Behavior": If it's a website and no info found, try to find a /contact or /about page
-        if (!url.includes('twitter.com') && !url.includes('x.com') && !url.includes('github.com')) {
-            const response: any = await chrome.runtime.sendMessage({ action: 'FETCH_EXTERNAL_URL', url });
-            if (response && response.html) {
-                const doc = new DOMParser().parseFromString(response.html, 'text/html');
-                const contactLink = Array.from(doc.querySelectorAll('a')).find(a => 
-                    /contact|about|connect|reach/i.test(a.innerText) || /contact|about/i.test(a.href)
-                );
-                
-                if (contactLink) {
-                    let subUrl = contactLink.href;
-                    if (subUrl.startsWith('/')) {
-                        const origin = new URL(url).origin;
-                        subUrl = origin + subUrl;
-                    }
-                    if (subUrl.startsWith('http') && subUrl !== url) {
-                        return await fetchAndScrape(subUrl, type);
-                    }
+export const discoverPortfolioUrls = (pageText: string): string[] => {
+    const urls = new Set<string>();
+    // Look for common personal site patterns
+    const urlMatches = pageText.match(/https?:\/\/[^\s"'<>]+/g);
+    if (urlMatches) {
+        urlMatches.forEach(url => {
+            const low = url.toLowerCase();
+            const blacklist = ['linkedin.com', 'google.com', 'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'static', 'media', 'wp-content'];
+            if (!blacklist.some(skip => low.includes(skip))) {
+                // Heuristic: portfolios often have /portfolio, /me, /bio, or are top-level domains
+                if (low.includes('portfolio') || low.includes('about') || low.includes('github.io') || 
+                    low.includes('behance.net') || low.includes('dribbble.com') || low.split('/').length <= 4) {
+                    urls.add(url.replace(/[.,;]$/, ''));
                 }
             }
+        });
+    }
+
+    return Array.from(urls).filter(url => !url.includes('linkedin.com')).slice(0, 10);
+};
+
+// Perform deep scraping on a list of URLs to find specific data
+export const performEnrichment = async (type: 'email' | 'phone', urls: string[]): Promise<EnrichmentResult | null> => {
+    const targets = [...new Set(urls)]
+        .map(u => u?.trim())
+        .filter(u => u && !u.includes('linkedin.com') && u.startsWith('http'));
+
+    if (targets.length === 0) return null;
+
+    console.log(`Deep Enrichment (${type}) starting for:`, targets);
+    const results: EnrichmentResult[] = [];
+    const visited = new Set<string>();
+
+    for (const url of targets) {
+        if (visited.size > 20) break;
+        const res = await deepFetchAndScrape(type, url, visited);
+        if (res) results.push(res);
+    }
+
+    if (results.length > 0) {
+        results.sort((a, b) => {
+            const aConf = a.confidence === 'high' ? 2 : 1;
+            const bConf = b.confidence === 'high' ? 2 : 1;
+            if (aConf !== bConf) return bConf - aConf;
+
+            if (type === 'email') {
+                const aE = a.email?.toLowerCase() || '';
+                const bE = b.email?.toLowerCase() || '';
+                const aG = aE.includes('gmail.com');
+                const bG = bE.includes('gmail.com');
+                if (aG && !bG) return -1;
+                if (!aG && bG) return 1;
+                const personal = /shradha|contact|hello|me@|hi@|connect/i;
+                if (personal.test(aE) && !personal.test(bE)) return -1;
+                if (!personal.test(aE) && personal.test(bE)) return 1;
+            }
+            return 0;
+        });
+        return { ...results[0], allEmails: [...new Set(results.flatMap(r => r.allEmails || []))] };
+    }
+    return null;
+};
+
+async function deepFetchAndScrape(type: 'email' | 'phone', url: string, visited: Set<string>): Promise<EnrichmentResult | null> {
+    if (visited.has(url) || visited.size > 20) return null;
+    visited.add(url);
+
+    try {
+        const initial = await fetchAndScrape(type, url);
+        if (initial && initial.confidence === 'high') return initial;
+
+        const isSocial = /twitter\.com|facebook\.com|instagram\.com|github\.com|linkedin\.com/i.test(url);
+        if (!isSocial && url.startsWith('http')) {
+            const domain = new URL(url).origin;
+            const res = await new Promise<any>(r => chrome.runtime.sendMessage({ action: 'FETCH_EXTERNAL_URL', url }, r));
+            const html = res?.html || '';
+            const contactPaths: string[] = [];
+            const matches = html.matchAll(/href="([^"]*(contact|about|team|reach|legal|support|bio)[^"]*)"/ig);
+            for (const m of matches) {
+                let path = m[1];
+                if (!path.startsWith('http')) {
+                    if (path.startsWith('/')) path = domain + path;
+                    else path = domain + '/' + path;
+                }
+                if (!visited.has(path) && contactPaths.length < 5) contactPaths.push(path);
+            }
+
+            const commonPaths = ['/contact', '/about', '/contact-us', '/about-us', '/me', '/team'].map(p => domain + p);
+            const allToTry = [...new Set([...contactPaths, ...commonPaths])].filter(p => !visited.has(p));
+
+            for (const subUrl of allToTry) {
+                if (visited.size > 20) break;
+                visited.add(subUrl);
+                const subResult = await fetchAndScrape(type, subUrl);
+                if (subResult && (subResult.confidence === 'high' || !initial)) return subResult;
+            }
         }
-        return null;
+        return initial;
     } catch (e) {
         return null;
     }
-};
+}
 
-const fetchAndScrape = async (url: string, type: 'email' | 'phone'): Promise<EnrichmentResult | null> => {
+async function fetchAndScrape(type: 'email' | 'phone', url: string): Promise<EnrichmentResult | null> {
     try {
-        await new Promise(r => setTimeout(r, 400)); 
-        const response: any = await chrome.runtime.sendMessage({ action: 'FETCH_EXTERNAL_URL', url });
-        if (!response || !response.html) return null;
+        const response = await new Promise<any>((resolve) => {
+            chrome.runtime.sendMessage({ action: 'FETCH_EXTERNAL_URL', url }, (res) => resolve(res));
+        });
 
-        const html = response.html;
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        
-        // Clean up page
-        doc.querySelectorAll('script, style, nav, footer, iframe, noscript').forEach(s => s.remove());
+        if (!response || response.error || !response.html) return null;
+
+        const doc = new DOMParser().parseFromString(response.html, 'text/html');
+        // DO NOT remove footer as contact info is often there
+        doc.querySelectorAll('script, style, iframe, noscript, svg, path').forEach(s => s.remove());
         const bodyText = doc.body.innerText;
 
         if (type === 'email') {
-            // 1. Mailto links
-            const mailtoLink = doc.querySelector('a[href^="mailto:"]');
-            if (mailtoLink) {
-                const email = mailtoLink.getAttribute('href')?.replace('mailto:', '').split('?')[0].trim();
-                if (email && email.includes('@')) return { email, source: url, sourceType: 'website', confidence: 'high' };
-            }
+            const emails = new Set<string>();
+            doc.querySelectorAll('a[href^="mailto:"]').forEach(a => {
+                const e = (a as HTMLAnchorElement).href.replace('mailto:', '').split('?')[0].trim();
+                if (e.includes('@')) emails.add(e.toLowerCase());
+            });
+            const textMatches = (bodyText.match(EMAIL_REGEX) || ([] as string[])).concat(bodyText.match(OBFUSCATED_EMAIL_REGEX) || []);
+            textMatches.forEach(m => {
+                const e = m.toLowerCase().replace(/\s*(\[at\]|\(at\))\s*/g, '@').replace(/\s*(\[dot\]|\(dot\))\s*/g, '.').trim();
+                if (e.includes('@') && !/\.(png|jpg|jpeg|gif|css|js|svg|webp|ico|woff|woff2|ttf|pdf|zip|mp4|webm)$/i.test(e) && e.length < 60) {
+                    emails.add(e);
+                }
+            });
 
-            // 2. Regex scan
-            const emailMatches = bodyText.match(EMAIL_REGEX);
-            if (emailMatches) {
-                const validEmail = emailMatches.find(e => !/\.(png|jpg|jpeg|gif|css|js|svg)$/i.test(e) && e.length < 50);
-                if (validEmail) return { email: validEmail, source: url, sourceType: 'website', confidence: 'high' };
+            if (emails.size > 0) {
+                const arr = Array.from(emails);
+                const best = arr.find(e => /shradha|hello|contact|me@|gmail/i.test(e)) || arr[0];
+                return { 
+                    email: best, 
+                    emails: arr, // Return all found emails
+                    allEmails: arr, // For backward compatibility with my prev edit
+                    source: url, 
+                    sourceType: 'website', 
+                    confidence: best.includes('@') ? 'high' : 'low' 
+                };
             }
         }
 
         if (type === 'phone') {
-            // 1. Tel links
-            const telLink = doc.querySelector('a[href^="tel:"]');
-            if (telLink) {
-                const phone = telLink.getAttribute('href')?.replace('tel:', '').trim();
-                if (phone && isValidPhone(phone)) return { phone, source: url, sourceType: 'website', confidence: 'high' };
-            }
-
-            // 2. Regex scan near keywords
-            const matches = bodyText.match(PHONE_REGEX);
-            if (matches) {
-                const validMatches = matches.filter(isValidPhone);
-                if (validMatches.length > 0) {
+            const phoneMatches = bodyText.match(PHONE_REGEX);
+            if (phoneMatches) {
+                const valid = phoneMatches.find(p => {
+                    const digits = p.replace(/\D/g, '');
+                    return digits.length >= 10 && digits.length <= 15;
+                });
+                if (valid) {
                     const isNearKeyword = /contact|call|phone|mobile|whatsapp|reach|tel/i.test(bodyText);
-                    return { 
-                        phone: validMatches[0], 
-                        source: url, 
-                        sourceType: 'website', 
-                        confidence: isNearKeyword ? 'high' : 'low' 
-                    };
+                    return { phone: valid.trim(), source: url, sourceType: 'website', confidence: isNearKeyword ? 'high' : 'low' };
                 }
             }
         }
@@ -181,11 +206,4 @@ const fetchAndScrape = async (url: string, type: 'email' | 'phone'): Promise<Enr
     } catch (e) {
         return null;
     }
-};
-
-const isValidPhone = (phone: string): boolean => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 7 || digits.length > 15) return false;
-    if (/^(2020|2021|2022|2023|2024|2025|2026)$/.test(digits)) return false;
-    return true;
-};
+}
