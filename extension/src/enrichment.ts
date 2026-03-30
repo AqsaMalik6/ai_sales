@@ -155,8 +155,8 @@ async function fetchAndScrape(type: 'email' | 'phone', url: string): Promise<Enr
 
         if (!response || response.error || !response.html) return null;
 
-        const doc = new DOMParser().parseFromString(response.html, 'text/html');
-        // DO NOT remove footer as contact info is often there
+        const rawHtml = response.html || "";
+        const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
         doc.querySelectorAll('script, style, iframe, noscript, svg, path').forEach(s => s.remove());
         const bodyText = doc.body.innerText;
 
@@ -166,21 +166,24 @@ async function fetchAndScrape(type: 'email' | 'phone', url: string): Promise<Enr
                 const e = (a as HTMLAnchorElement).href.replace('mailto:', '').split('?')[0].trim();
                 if (e.includes('@')) emails.add(e.toLowerCase());
             });
-            const textMatches = (bodyText.match(EMAIL_REGEX) || ([] as string[])).concat(bodyText.match(OBFUSCATED_EMAIL_REGEX) || []);
-            textMatches.forEach(m => {
+            
+            // Scan RAW HTML to catch emails hidden in JSON payloads or React props on CSR sites
+            const textMatches = (rawHtml.match(EMAIL_REGEX) || ([] as string[])).concat(rawHtml.match(OBFUSCATED_EMAIL_REGEX) || []);
+            textMatches.forEach((m: string) => {
                 const e = m.toLowerCase().replace(/\s*(\[at\]|\(at\))\s*/g, '@').replace(/\s*(\[dot\]|\(dot\))\s*/g, '.').trim();
+                // Filter out false positives (image files, etc)
                 if (e.includes('@') && !/\.(png|jpg|jpeg|gif|css|js|svg|webp|ico|woff|woff2|ttf|pdf|zip|mp4|webm)$/i.test(e) && e.length < 60) {
-                    emails.add(e);
+                    if (!e.includes('sentry') && !e.includes('w3.org')) emails.add(e);
                 }
             });
 
             if (emails.size > 0) {
                 const arr = Array.from(emails);
-                const best = arr.find(e => /shradha|hello|contact|me@|gmail/i.test(e)) || arr[0];
+                const best = arr.find((e: string) => /shradha|hello|contact|me@|gmail/i.test(e)) || arr[0];
                 return { 
                     email: best, 
-                    emails: arr, // Return all found emails
-                    allEmails: arr, // For backward compatibility with my prev edit
+                    emails: arr, 
+                    allEmails: arr, 
                     source: url, 
                     sourceType: 'website', 
                     confidence: best.includes('@') ? 'high' : 'low' 
@@ -189,9 +192,9 @@ async function fetchAndScrape(type: 'email' | 'phone', url: string): Promise<Enr
         }
 
         if (type === 'phone') {
-            const phoneMatches = bodyText.match(PHONE_REGEX);
+            const phoneMatches = rawHtml.match(PHONE_REGEX);
             if (phoneMatches) {
-                const valid = phoneMatches.find(p => {
+                const valid = phoneMatches.find((p: string) => {
                     const digits = p.replace(/\D/g, '');
                     return digits.length >= 10 && digits.length <= 15;
                 });
@@ -207,3 +210,79 @@ async function fetchAndScrape(type: 'email' | 'phone', url: string): Promise<Enr
         return null;
     }
 }
+const rapidApiCache = new Map<string, { email?: string, phone?: string }>();
+
+export const rapidApiContactSearch = async (linkedinUrl: string): Promise<{ email?: string, phone?: string } | null> => {
+    // RapidAPI logic commented out as requested
+    /*
+    try {
+        if (rapidApiCache.has(linkedinUrl)) {
+            console.log('[RapidAPI] Returning cached result for:', linkedinUrl);
+            return rapidApiCache.get(linkedinUrl) || null;
+        }
+
+        const match = linkedinUrl.match(/\/in\/([^/?#\s]+)/);
+        if (!match) return null;
+        const username = match[1];
+
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'FETCH_RAPID_API', username }, (response) => {
+                if (response?.success && response.data) {
+                    const rawData = response.data;
+                    console.log('[RapidAPI] Full Object Received:', rawData);
+                    
+                    let foundEmail: string | undefined;
+                    let foundPhone: string | undefined;
+
+                    // Recursive search for email and phone in the object structure
+                    const scan = (obj: any) => {
+                        if (!obj || typeof obj !== 'object') return;
+                        
+                        // Check keys in this object
+                        for (const key in obj) {
+                            const val = obj[key];
+                            const lowKey = key.toLowerCase();
+
+                            // Email Search
+                            if (!foundEmail && (lowKey.includes('email') || lowKey === 'gmail')) {
+                                if (typeof val === 'string' && val.includes('@')) {
+                                    foundEmail = val;
+                                }
+                            }
+
+                            // Phone Search
+                            if (!foundPhone && (lowKey.includes('phone') || lowKey === 'mobile' || lowKey === 'contact_number' || lowKey === 'whatsapp')) {
+                                if (val && (typeof val === 'string' || typeof val === 'number')) {
+                                    const digits = String(val).replace(/\D/g, '');
+                                    if (digits.length >= 8) foundPhone = String(val);
+                                }
+                            }
+
+                            // Deep scan if it's an object or array
+                            if (typeof val === 'object') scan(val);
+                        }
+                    };
+
+                    scan(rawData);
+
+                    const result = { 
+                        email: (foundEmail && foundEmail !== 'null') ? foundEmail : undefined, 
+                        phone: (foundPhone && foundPhone !== 'null') ? foundPhone : undefined 
+                    };
+                    
+                    console.log('[RapidAPI] Final Extracted Data:', result);
+                    rapidApiCache.set(linkedinUrl, result);
+                    setTimeout(() => rapidApiCache.delete(linkedinUrl), 60000);
+                    resolve(result);
+                } else {
+                    resolve(null);
+                }
+            });
+        });
+    } catch (e) {
+        console.error('[RapidAPI] Error:', e);
+        return null;
+    }
+    */
+    return null;
+};

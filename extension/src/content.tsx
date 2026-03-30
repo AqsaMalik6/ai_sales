@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { performEnrichment } from './enrichment';
+import { performEnrichment, rapidApiContactSearch } from './enrichment';
 import { generateEmailPatterns, findCompanyDomain, getFirstLastName } from './emailPatternGenerator';
-import { verifyEmailsBatch } from './smtpClient';
 
 interface ContactData {
     fullName: string;
@@ -48,19 +47,6 @@ const Sidebar: React.FC = () => {
     const [smtpOffline, setSmtpOffline] = useState(false);
 
     useEffect(() => {
-        // Check SMTP server status via Background Script (to bypass CSP)
-        const checkSmtp = () => {
-            if (typeof chrome !== 'undefined' && chrome.runtime) {
-                chrome.runtime.sendMessage({ action: 'CHECK_SMTP_STATUS' }, (response) => {
-                    if (response && response.online) setSmtpOffline(false);
-                    else setSmtpOffline(true);
-                });
-            }
-        };
-
-        checkSmtp();
-        const smtpInterval = setInterval(checkSmtp, 10000);
-
         const messageListener = (message: any) => {
             if (message.action === 'TOGGLE_SIDEBAR') {
                 setIsVisible(prev => !prev);
@@ -75,7 +61,6 @@ const Sidebar: React.FC = () => {
             chrome.runtime.onMessage.addListener(messageListener);
             return () => {
                 chrome.runtime.onMessage.removeListener(messageListener);
-                clearInterval(smtpInterval);
             };
         }
     }, []);
@@ -107,7 +92,7 @@ const Sidebar: React.FC = () => {
             for (const selector of nameSelectors) {
                 const el = document.querySelector(selector);
                 if (el && el.textContent?.trim()) {
-                    const text = el.textContent.trim().split(/\s+·\s+/)[0]; // Remove degree (e.g. Sana Ikram · 1st)
+                    const text = el.textContent.trim().split(/\s+·\s+/)[0];
                     if (text && text.toLowerCase() !== 'contact info' && text.length < 100 && text.length > 2 && !text.includes('LinkedIn')) {
                         fullName = text;
                         break;
@@ -115,202 +100,223 @@ const Sidebar: React.FC = () => {
                 }
             }
 
-            // Desperate Name Fallback: Document Title
             if (!fullName && document.title && document.title.includes('|')) {
                 const titleName = document.title.split('|')[0].trim();
-                // Ensure titleName is not the company name from title
                 if (titleName && !titleName.includes('LinkedIn')) fullName = titleName;
             }
 
-            // Robust Job/Headline Selectors
-            // Robust Job/Headline Selectors
             const jobTitle = document.querySelector('.text-body-medium.break-words')?.textContent?.trim() ||
                 document.querySelector('.pv-text-details__left-panel .text-body-medium')?.textContent?.trim() ||
-                document.querySelector('meta[name="description"]')?.getAttribute('content')?.split('·')[1]?.trim() ||
-                document.querySelector('.text-body-medium')?.textContent?.trim() ||
-                document.querySelector('[data-field="headline"]')?.textContent?.trim() ||
-                document.querySelector('main#main .text-body-medium span')?.textContent?.trim() ||
-                document.title.split('|')[1]?.trim() || ''; // Fallback to window title part
+                document.querySelector('.text-body-medium')?.textContent?.trim() || '';
 
             const headline = jobTitle;
-            let currentJobTitle = headline; // Default to headline
+            let currentJobTitle = headline;
             let companyText = '';
 
-            // PRIORITY 1: Right side of profile name (Top Card)
-            const topCardCompany = document.querySelector('a[data-field="parent_company_display_name"]') ||
-                document.querySelector('.pv-text-details__right-panel-item-text') ||
-                document.querySelector('.pv-text-details__right-panel li button span') ||
-                document.querySelector('.pv-top-card--experience-list-item');
-
-            if (topCardCompany && topCardCompany.textContent?.trim()) {
-                const text = topCardCompany.textContent.trim();
-                const isAction = text.toLowerCase() === 'follow' || text.toLowerCase() === 'message' || text.toLowerCase() === 'connect';
-                // Allow Universities as companies, but filter out pure action buttons
-                if (!isAction && text.length > 2) {
-                    companyText = text;
-                }
+            // PRIORITY 1: HTML RAW STRING SCAN (Absolute 100% Guarantee if localized)
+            const htmlRaw = document.documentElement.innerHTML;
+            // Support "Current company:" or just standard labeled attributes
+            const ariaMatch = htmlRaw.match(/aria-label="(?:Current company|Current university|Education):\s*([^"]+?)(?:\.\s*Click|")/i);
+            if (ariaMatch && ariaMatch[1]) {
+                companyText = ariaMatch[1].trim();
             }
 
-            // PRIORITY 2: Top of Experience Section (Header Discovery)
+            // Anchor strictly to the h1 container to avoid finding unrelated sections
+            const h1 = document.querySelector('h1.text-heading-xlarge, h1');
+            const topCard = h1 ? (h1.closest('section') || h1.closest('.ph5') || document.querySelector('.pv-top-card')) || document.body : document.body;
+
+            // PRIORITY 2: TOP CARD LOGO ALT TEXT
             if (!companyText) {
-                const sections = Array.from(document.querySelectorAll('section'));
-                const expSec = sections.find(s => {
-                    const h2 = s.querySelector('h2');
-                    return h2 && h2.textContent?.toLowerCase().includes('experience');
-                }) || document.getElementById('experience')?.closest('section') as HTMLElement | null;
+                // Focus strictly on links/buttons in topCard
+                const logos = topCard.querySelectorAll('a img, button img, .pv-text-details__right-panel-item-link img');
+                for (const img of Array.from(logos)) {
+                    if ((img.className || "").match(/profile-picture|background|cover|premium|ghost/i)) continue;
+                    let alt = img.getAttribute('alt')?.trim() || "";
 
-                if (expSec) {
-                    const firstItem = expSec.querySelector('ul.pvs-list > li') || expSec.querySelector('.pvs-list__item');
-                    if (firstItem) {
-                        const allSpans = Array.from(firstItem.querySelectorAll('span[aria-hidden="true"], .t-bold'))
-                            .map(s => s.textContent?.trim() || '')
-                            .filter(t => t.length > 2 && !t.includes('Present') && !t.includes('yrs') && !t.includes('mos'));
+                    // Deep cleanup of noise
+                    alt = alt.replace(/^(?:View|Visit|Website)\s+/i, '').replace(/\s+logo$/i, '').replace(/(?:Current )?Company:\s*/i, '').trim();
 
-                        if (allSpans.length >= 2) {
-                            // If index 1 has a bullet, split it: "Company · Full-time"
-                            let rawCompany = allSpans[1];
-                            if (rawCompany.includes('·')) rawCompany = rawCompany.split('·')[0].trim();
-
-                            // If first item looks like a company name but second is a title (usually the other way)
-                            if (allSpans[1].toLowerCase().includes('yrs') || allSpans[1].toLowerCase().includes('mos')) {
-                                companyText = allSpans[0];
-                            } else {
-                                companyText = rawCompany;
-                            }
-                        } else if (allSpans.length === 1) {
-                            companyText = allSpans[0];
-                        }
-                    }
-                }
-            }
-
-            if (!companyText) {
-                const companySelectors = [
-                    'button[data-field="experience_company_logo"]',
-                    'div[aria-label="Current company"]',
-                    '.artdeco-entity-lockup__subtitle',
-                    '#experience ~ div .pvs-entity span[aria-hidden="true"]',
-                    '[data-field="current_company_display_name"]',
-                    'a[href*="/company/"] span:not(.visually-hidden)',
-                    '.pv-entity__secondary-title',
-                    '.pv-top-card--experience-list-item span'
-                ];
-
-                for (const selector of companySelectors) {
-                    const el = document.querySelector(selector);
-                    if (el && el.textContent?.trim()) {
-                        const text = el.textContent.trim();
-                        if (text.length < 100 && text.length > 2 && !text.includes('·') && !text.toLowerCase().includes('followers') && text.toLowerCase() !== 'follow') {
-                            companyText = text;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Sync jobTitle with the extracted role if found in priority 2
-            const experienceTitle = document.querySelector('#experience ~ div .pvs-entity span[aria-hidden="true"]')?.textContent?.trim() ||
-                document.querySelector('section#experience-section ul li span:nth-child(1)')?.textContent?.trim();
-            if (experienceTitle && experienceTitle.length < 80) currentJobTitle = experienceTitle;
-
-            const profilePhoto = (document.querySelector('.pv-top-card-profile-picture__image') as HTMLImageElement)?.src ||
-                (document.querySelector('.pv-top-card-profile-picture img') as HTMLImageElement)?.src ||
-                (document.querySelector('.pv-top-card--photo img') as HTMLImageElement)?.src || '';
-            const linkedinUrl = getNormalizedUrl(window.location.href);
-            // HIGHLY ROBUST LOCATION DISCOVERY
-            let extractedLocation = "";
-
-            // Method 1: Surgical sibling extraction near Contact Info
-            const contactInfoBtn = Array.from(document.querySelectorAll('a, button')).find(el => (el as HTMLElement).innerText?.toLowerCase().includes('contact info'));
-            if (contactInfoBtn) {
-                const parentText = contactInfoBtn.parentElement?.innerText || "";
-                // Clean the text: remove "Contact info", separators, and trim
-                const clean = parentText.replace(/contact info/gi, '').replace(/[·•]/g, '').trim();
-                if (clean && clean.length > 2 && clean.length < 100 && !clean.toLowerCase().includes('connection') && !clean.toLowerCase().includes('follower')) {
-                    extractedLocation = clean;
-                }
-            }
-
-            // Method 2: Specific CSS Selectors (LinkedIn Standard)
-            if (!extractedLocation) {
-                const locSelectors = [
-                    '.text-body-small.inline.t-black--light.break-words',
-                    '.pv-text-details__left-panel .text-body-small',
-                    '.pv-top-card--list-bullet .text-body-small',
-                    'span.text-body-small.v-align-middle.break-words',
-                    '.ph5 .mt2 span.text-body-small'
-                ];
-                for (const sel of locSelectors) {
-                    const el = document.querySelector(sel);
-                    if (el && el.textContent?.trim() && el.textContent.trim().length > 2) {
-                        extractedLocation = el.textContent.trim();
+                    if (alt && alt.length > 1 && !alt.match(/profile|avatar|background|cover image|cover photo|banner|premium|image|photo|picture|celebration/i)) {
+                        companyText = alt;
                         break;
                     }
                 }
             }
 
-            const location = extractedLocation || "Not specified";
+            // PRIORITY 3: RIGHT PANEL TEXT ELIMINATION
+            if (!companyText) {
+                const rightPanel = topCard.querySelector('.pv-text-details__right-panel, ul.pv-top-card--experience-list, .pv-text-details__right-panel-item-list');
+                const searchArea = rightPanel || topCard;
+                const buttons = Array.from(searchArea.querySelectorAll('a, button, li'));
 
-            // Robust About Section Discovery
-            let aboutText = '';
-            const allSections = Array.from(document.querySelectorAll('section'));
-            // 1. Find section by H2 header
-            let aboutSection = allSections.find(s => {
-                const h2 = s.querySelector('h2');
-                const text = h2?.textContent?.trim().toLowerCase();
-                return text === 'about' || text?.includes('about this profile');
-            }) || document.getElementById('about')?.closest('section');
+                for (const btn of buttons) {
+                    // If searching whole topCard, require an image to avoid generic buttons
+                    if (!rightPanel && !btn.querySelector('img')) continue;
 
-            // 2. If not found, try common about section classes
-            if (!aboutSection) {
-                aboutSection = (document.querySelector('.pv-about-section') as HTMLElement) ||
-                    (document.querySelector('section.pv-profile-card--about') as HTMLElement);
+                    // Block Profile/Banner buttons
+                    if ((btn.className || "").match(/profile|cover|banner|background/i)) continue;
+
+                    let aria = btn.getAttribute('aria-label') || "";
+                    let activeText = aria || (btn as HTMLElement).innerText || btn.textContent || "";
+                    activeText = activeText.split('\n').map(t => t.trim()).find(t => t.length > 1) || "";
+
+                    // Strip 'View', 'Current Company', etc to isolate just the name
+                    activeText = activeText.replace(/(?:Current company|Current university|Education):\s*/ig, '').replace(/Click to skip.*/ig, '')
+                        .replace(/^(?:View|Visit|Website)\s+/i, '').replace(/\.$/, '').trim();
+
+                    if (activeText.length > 1 && !activeText.match(/followers?|connections?|mutual|shared|contact|message|profile|premium|more|follow|connect|send|image|photo|picture|celebration/i) && !activeText.includes('http') && !activeText.includes('www.')) {
+                        companyText = activeText; break;
+                    }
+                }
             }
 
-            if (aboutSection) {
-                const contentSelectors = [
-                    '.inline-show-more-text span[aria-hidden="true"]',
-                    '.inline-show-more-text',
-                    '.pv-shared-text-with-see-more span[aria-hidden="true"]',
-                    '.pv-shared-text-with-see-more',
-                    '.t-14.t-black.t-normal.break-words span[aria-hidden="true"]',
-                    'div > span[aria-hidden="true"]',
-                    'span'
-                ];
+            // PRIORITY 4: EXPERIENCE SECTION (ChatGPT Inspired, Noise-Free)
+            if (!companyText) {
+                const expHeadline = document.getElementById('experience') || document.querySelector('#experience-section') || Array.from(document.querySelectorAll('h2')).find(h2 => h2.textContent?.toLowerCase().includes('experience'));
+                const expSec = expHeadline?.closest('section') || document.querySelector('#experience-section');
 
-                for (const sel of contentSelectors) {
-                    const el = aboutSection.querySelector(sel);
-                    if (el && el.textContent?.trim()) {
-                        const text = el.textContent.trim().replace(/\s+/g, ' ');
-                        // Ensure it's substantial and not just the header text
-                        if (text.length > 10 && text.toLowerCase() !== 'about') {
-                            aboutText = text;
-                            break;
+                if (expSec) {
+                    const firstItem = expSec.querySelector('.pvs-list > li, li.artdeco-list__item, li.experience-item');
+                    if (firstItem) {
+                        // Strictly extract ONLY the core titles/companies to avoid locations as "noise"
+                        const textNodes = Array.from(firstItem.querySelectorAll('.t-bold span[aria-hidden="true"], .t-normal span[aria-hidden="true"], .t-14 span[aria-hidden="true"]'))
+                            .map(el => el.textContent?.trim() || "")
+                            .filter(t => t.length > 1 && !t.includes('Present') && !t.match(/yrs?|mos?|Full-time|Part-time|Self-employed|Freelance|Contract|Internship|Apprenticeship|Remote|On-site|Hybrid/i));
+
+                        // Deduplicate 
+                        const uniqueTexts = [...new Set(textNodes)];
+                        const isMultipleRoleGroup = firstItem.querySelector('.pvs-entity--with-path');
+
+                        if (uniqueTexts.length >= 2) {
+                            companyText = (isMultipleRoleGroup ? uniqueTexts[0] : uniqueTexts[1]).split(/\s+·\s+/)[0];
+                        } else if (uniqueTexts.length === 1) {
+                            companyText = uniqueTexts[0].split(/\s+·\s+/)[0];
                         }
                     }
                 }
             }
 
-            // Fallback: If section found but content elusive, take everything but the header
-            if (aboutSection && !aboutText) {
-                const clone = aboutSection.cloneNode(true) as HTMLElement;
-                clone.querySelector('h2')?.remove();
-                clone.querySelector('button')?.remove(); // Remove "see more"
-                aboutText = (clone as HTMLElement).innerText.trim().replace(/\s+/g, ' ');
+            // PRIORITY 5: DESPERATE COMPANY SEARCH
+            if (!companyText) {
+                const desperatelyFind = document.querySelector('a[data-field="experience_company_logo"], a[href*="/company/"]');
+                if (desperatelyFind) {
+                    const aria = desperatelyFind.getAttribute('aria-label') || "";
+                    const match = aria.match(/(?:company|university):\s*([^.]+)/i);
+                    if (match && match[1]) {
+                        companyText = match[1].trim();
+                    } else {
+                        let text = desperatelyFind.textContent?.trim() || "";
+                        if (text) companyText = text.replace(/logo/i, '').trim();
+                    }
+                }
+            }
+
+            // PRIORITY 6: HEADLINE FALLBACK (Infallible Text-level backup)
+            if (!companyText && headline) {
+                if (headline.toLowerCase().includes(' at ')) {
+                    const parts = headline.split(/\s+at\s+/i);
+                    if (parts.length > 1) {
+                        companyText = parts[parts.length - 1].split('|')[0].trim();
+                    }
+                }
+            }
+
+            // PRIORITY 3: Education Section Safe Fallback
+            if (!companyText) {
+                const eduSec = document.getElementById('education')?.closest('section') || Array.from(document.querySelectorAll('section')).find(s => s.querySelector('h2')?.textContent?.toLowerCase().includes('education'));
+                if (eduSec) {
+                    const firstEdu = eduSec.querySelector('.pvs-list > li, li.artdeco-list__item');
+                    if (firstEdu) {
+                        const eduTexts = Array.from(firstEdu.querySelectorAll('span[aria-hidden="true"]'))
+                            .map(el => el.textContent?.trim() || "")
+                            .filter(t => t.length > 1 && !t.match(/grade|activities|societies/i));
+                        if (eduTexts.length > 0) companyText = eduTexts[0];
+                    }
+                }
+            }
+
+            // HIGHLY ROBUST LOCATION DISCOVERY
+            let extractedLocation = "";
+            const contactInfoBtn = Array.from(document.querySelectorAll('a')).find(el => el.textContent?.toLowerCase().includes('contact info'));
+
+            if (contactInfoBtn) {
+                const container = contactInfoBtn.closest('.pv-text-details__left-panel') || contactInfoBtn.parentElement?.parentElement;
+                if (container) {
+                    const spans = Array.from(container.querySelectorAll('span.text-body-small'));
+                    for (const span of spans) {
+                        const t = span.textContent?.trim() || "";
+                        if (t.length > 2 && !t.match(/follower|connection|contact/i) && !span.querySelector('a')) {
+                            extractedLocation = t.split(/\n/)[0].trim().replace(/\s*·\s*$/, '').trim();
+                            break;
+                        }
+                    }
+                    if (!extractedLocation) {
+                        const rawText = container.textContent || "";
+                        const beforeContact = rawText.split(/contact info/i)[0];
+                        const lines = beforeContact.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                        if (lines.length > 0) {
+                            const lastLine = lines[lines.length - 1];
+                            if (!lastLine.match(/follower|connection/i)) {
+                                extractedLocation = lastLine.replace(/^[\s·]+|[\s·]+$/g, '').trim();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!extractedLocation) {
+                const locSelectors = [
+                    '.pv-text-details__left-panel span.text-body-small.inline.t-black--light.break-words',
+                    '.pv-text-details__left-panel span.text-body-small.inline',
+                    '.text-body-small.inline.t-black--light.break-words',
+                    '.ph5 .mt2 span.text-body-small'
+                ];
+                for (const sel of locSelectors) {
+                    const elements = document.querySelectorAll(sel);
+                    for (const el of Array.from(elements)) {
+                        const t = el.textContent?.trim() || "";
+                        if (t.length > 2 && !t.match(/follower|connection|contact/i)) {
+                            extractedLocation = t.split(/\n/)[0].trim().replace(/^[\s·]+|[\s·]+$/g, '').trim();
+                            break;
+                        }
+                    }
+                    if (extractedLocation) break;
+                }
+            }
+
+            const location = extractedLocation || "Not specified";
+
+            // ROBUST ABOUT DISCOVERY
+            let aboutText = '';
+            const allSections = Array.from(document.querySelectorAll('section'));
+            let aboutSection = allSections.find(s => {
+                const h2 = s.querySelector('h2');
+                return h2 && h2.textContent?.trim().toLowerCase().includes('about');
+            }) || document.getElementById('about')?.closest('section');
+
+            if (aboutSection) {
+                const contentSelector = '.inline-show-more-text, .pv-shared-text-with-see-more, .pv-about-section__summary-text';
+                const el = aboutSection.querySelector(contentSelector);
+                if (el) {
+                    aboutText = el.textContent?.trim().replace(/\s+/g, ' ') || "";
+                } else {
+                    const clone = aboutSection.cloneNode(true) as HTMLElement;
+                    clone.querySelector('h2')?.remove();
+                    clone.querySelector('button')?.remove();
+                    aboutText = clone.innerText.trim().replace(/\s+/g, ' ');
+                }
             }
 
             const pageText = document.body.innerText;
-            const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
+            const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@gmail\.com|@outlook\.com|@icloud\.com/gi;
             const PHONE_REGEX = /(?:\+?\d{1,3}[\s\. -])?\(?\d{2,4}\)?[\s\. -]?\d{3,4}[\s\. -]?\d{3,6}/g;
 
-            const experienceStr = Array.from(document.querySelectorAll('#experience ~ div .pvs-entity, #experience ~ div .display-flex.flex-column.full-width')).slice(0, 3).map(el => el.textContent?.trim()).filter(Boolean).join('\n---\n');
-            const educationStr = Array.from(document.querySelectorAll('#education ~ div .pvs-entity, #education ~ div .display-flex.flex-column.full-width')).slice(0, 3).map(el => el.textContent?.trim()).filter(Boolean).join('\n---\n');
-            const servicesStr = document.querySelector('.pv-top-card--services')?.textContent?.trim() || '';
+            const experienceStr = Array.from(document.querySelectorAll('#experience ~ div .pvs-entity')).slice(0, 3).map(el => el.textContent?.trim()).filter(Boolean).join('\n---\n');
+            const educationStr = Array.from(document.querySelectorAll('#education ~ div .pvs-entity')).slice(0, 3).map(el => el.textContent?.trim()).filter(Boolean).join('\n---\n');
 
             let email = '';
             let phone = '';
 
-            // Last resort: scan page text for emails/phones if they look like they belong to the profile
             if (pageText) {
                 const emails = pageText.match(EMAIL_REGEX);
                 if (emails) email = emails.find(e => !/\.(png|jpg|jpeg|gif|css|js|svg)$/i.test(e) && e.length < 50 && !e.includes('reply-to')) || '';
@@ -326,34 +332,54 @@ const Sidebar: React.FC = () => {
                 fullName,
                 jobTitle: currentJobTitle || jobTitle || 'No Title',
                 company: companyText || 'No Company Data',
-                profilePhoto,
-                linkedinUrl,
+                profilePhoto: '', // Disabled Profile Photo Capture Completely
+                linkedinUrl: window.location.href,
                 headline,
                 location: location || 'Not specified',
                 about: aboutText,
                 experience: experienceStr || '',
                 education: educationStr || '',
-                services: servicesStr || '',
+                services: '',
                 email: email || undefined,
                 phone: phone || undefined
             };
 
             setContact(prev => {
-                if (!prev || getNormalizedUrl(prev.linkedinUrl) !== getNormalizedUrl(linkedinUrl)) {
-                    return currentContact;
-                }
-                const hasSubstantialNewData = fullName && companyText;
-                if (!hasSubstantialNewData && prev.fullName) return prev; // Don't wipe data with empty scan
+                const currentHref = window.location.href;
+                if (!currentHref.includes('/in/')) return prev; // Do not wipe outside of profile pages
 
-                // Preserve email/phone if they exist in state or are found in current scan
+                const isNewProfile = !prev || getNormalizedUrl(prev.linkedinUrl) !== getNormalizedUrl(currentHref);
+
+                // If it is a new profile link, aggressively reset the state to avoid 'pichli profile ka data'
+                if (isNewProfile) {
+                    if (!fullName) {
+                        return { fullName: 'Scanning...', jobTitle: '', company: 'Scanning...', headline: '', location: 'Scanning...', about: '', experience: '', education: '', services: '', linkedinUrl: currentHref, profilePhoto: '' };
+                    }
+                    return currentContact; // Fresh setup
+                }
+
+                // If we are on the exact same profile but DOM is empty (e.g. while scrolling/loading)
+                if (!fullName) return prev;
+
+                // If the DOM name violently changed while on the same URL (DOM catch-up phase)
+                if (prev.fullName !== 'Scanning...' && prev.fullName !== fullName) {
+                    return currentContact; // Treat it as a hard reset to the new data
+                }
+
                 return {
                     ...currentContact,
+                    // Persist discovered data, never fallback to "Scanning..." or old profile data
+                    company: currentContact.company !== 'No Company Data' ? currentContact.company : prev.company,
+                    location: currentContact.location !== 'Not specified' ? currentContact.location : prev.location,
+                    about: currentContact.about || prev.about,
                     email: currentContact.email || prev.email,
                     phone: currentContact.phone || prev.phone,
-                    phoneSource: prev.phoneSource,
-                    phoneConfidence: prev.phoneConfidence,
+                    emails: prev.emails,
                     emailSource: prev.emailSource,
-                    emailConfidence: prev.emailConfidence
+                    phoneSource: prev.phoneSource,
+                    emailConfidence: prev.emailConfidence,
+                    phoneConfidence: prev.phoneConfidence,
+                    profilePhoto: ''
                 };
             });
         } catch (err) {
@@ -417,7 +443,7 @@ const Sidebar: React.FC = () => {
 
                     // 2. Extract Email directly
                     // BROAD SEARCH: scan all text in the modal for any email match
-                    const emailRegex = /[a-zA-Z0-9._%+-]+@gmail\.com/gi;
+                    const emailRegex = /[a-zA-Z0-9._%+-]+@gmail\.com|@outlook\.com|@icloud\.com/gi;
                     const modalText = modal.innerText;
                     const foundEmails = modalText.match(emailRegex);
                     if (foundEmails && foundEmails.length > 0) {
@@ -480,6 +506,32 @@ const Sidebar: React.FC = () => {
         return { emails, email, phone, links };
     };
 
+    const scanActivity = (): { email?: string, phone?: string } => {
+        try {
+            console.log("Scanning activity section for contacts...");
+            const activitySection = Array.from(document.querySelectorAll('section')).find(s =>
+                s.querySelector('h2')?.textContent?.toLowerCase().includes('activity')
+            ) || document.querySelector('.pv-activity-section');
+
+            if (!activitySection) {
+                console.warn("Activity section not found on page.");
+                return {};
+            }
+
+            const text = (activitySection as HTMLElement).innerText;
+            const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@gmail\.com|@outlook\.com|@icloud\.com/gi;
+            const PHONE_REGEX = /(?:\+?\d{1,3}[\s\. -])?\(?\d{2,4}\)?[\s\. -]?\d{3,4}[\s\. -]?\d{3,6}/g;
+
+            const email = text.match(EMAIL_REGEX)?.[0];
+            const phone = text.match(PHONE_REGEX)?.find(p => p.replace(/\D/g, '').length >= 10);
+
+            return { email, phone };
+        } catch (e) {
+            console.error("Activity Scan Error:", e);
+            return {};
+        }
+    };
+
     const enrichData = async (type: 'email' | 'phone') => {
         if (!contact || loadingEnrich) return;
         setLoadingEnrich(true);
@@ -494,101 +546,100 @@ const Sidebar: React.FC = () => {
         let phoneSource = '';
         let phoneConfidence: 'high' | 'low' = 'high';
 
-        // ALWAYS trigger enrichment if the user specifically requested it by clicking the button
-        // especially if the current email is not a personal one (Gmail etc)
         const isPersonalEmail = finalEmail && (finalEmail.includes('gmail.com') || finalEmail.includes('outlook.com') || finalEmail.includes('icloud.com'));
 
-        if (type === 'email' && (!isPersonalEmail || finalEmail === "Not available")) {
-            showToast('Searching portfolio & company websites...', 'success');
+        // FALLBACK CASCADE FOR EMAIL
+        if (type === 'email' && (finalEmail === "Not available" || !isPersonalEmail)) {
+            showToast('Searching for verified email...', 'success');
+
+            // 1. Website Enrichment
             const currentLinks = [...results.links];
-
-            // Try to find domain first
-            const companyDomain = await findCompanyDomain(contact.company);
-            if (companyDomain) {
-                const companyUrl = `https://${companyDomain}`;
-                if (!currentLinks.some(l => l.includes(companyDomain))) {
-                    currentLinks.push(companyUrl);
-                }
-            }
-
-            // 3. Perform deep enrichment on all links Found
             const enrichment = await performEnrichment('email', currentLinks);
             if (enrichment && enrichment.email) {
-                // If multiple emails were found in the deep scan, we could add them here
-                // For now, prioritize the best one but keep others if it was a deep fetch
                 finalEmail = enrichment.email;
                 emailSource = enrichment.source;
                 emailConfidence = enrichment.confidence;
-
-                // If we want to capture all emails from enrichment result (need to update EnrichmentResult too)
                 if ((enrichment as any).allEmails) {
                     emails = [...new Set([...emails, ...(enrichment as any).allEmails])];
                 } else if (!emails.includes(finalEmail)) {
                     emails.push(finalEmail);
                 }
-            } else if (companyDomain) {
-                // FALLBACK: Pattern Generator + SMTP Verifier
-                showToast('Attempting Pattern-based SMTP verification...', 'success');
-                try {
-                    const { first, last } = getFirstLastName(contact.fullName);
-                    const patterns = generateEmailPatterns(first, last, companyDomain);
-                    const verifyResults = await verifyEmailsBatch(patterns);
+            }
 
-                    // Find first valid or unknown
-                    const best = verifyResults.find(r => r.status === 'valid') || verifyResults.find(r => r.status === 'unknown');
-                    if (best) {
-                        finalEmail = best.email;
-                        emailSource = 'Pattern+SMTP';
-                        emailConfidence = best.status === 'valid' ? 'high' : 'low';
-                        setSmtpOffline(false);
-                    }
-                } catch (e) {
-                    if ((e as Error).message === 'SMTP_OFFLINE') {
-                        setSmtpOffline(true);
-                    }
+            // 2. Activity/Posts Scan
+            if (finalEmail === "Not available" || !finalEmail) {
+                const act = scanActivity();
+                if (act.email) {
+                    finalEmail = act.email;
+                    emailSource = 'Activity Feed Scan';
+                    emailConfidence = 'high';
+                    if (!emails.includes(finalEmail)) emails.push(finalEmail);
+                }
+            }
+
+            // 3. Deep Page Scan
+            if (finalEmail === "Not available" || !finalEmail) {
+                const deepText = document.body.innerText;
+                const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@gmail\.com|@outlook\.com|@icloud\.com/gi;
+                const found = deepText.match(EMAIL_REGEX);
+                if (found && found.length > 0) {
+                    finalEmail = found[0].toLowerCase();
+                    emailSource = 'Intelligence Scan';
+                    emailConfidence = 'high';
                 }
             }
         }
 
+        // PHONE FALLBACK CASCADE
         if (type === 'phone' && (finalPhone === "Not available" || !finalPhone)) {
-            showToast('Searching portfolio & company websites...', 'success');
+            showToast('Searching for contact number...', 'success');
 
-            // 1. Get initial links from modal/page
-            const currentLinks = [...results.links];
+            // 1. Activity Scan
+            const act = scanActivity();
+            if (act.phone) {
+                finalPhone = act.phone;
+                phoneSource = 'Activity Feed Scan';
+                phoneConfidence = 'high';
+            }
 
-            // 2. Proactively find company domain
-            const companyDomain = await findCompanyDomain(contact.company);
-            if (companyDomain) {
-                const companyUrl = `https://${companyDomain}`;
-                if (!currentLinks.some(l => l.includes(companyDomain))) {
-                    currentLinks.push(companyUrl);
+            // 2. Website Scan
+            if (finalPhone === "Not available") {
+                const currentLinks = [...results.links];
+                const enrichment = await performEnrichment('phone', currentLinks);
+                if (enrichment && enrichment.phone) {
+                    finalPhone = enrichment.phone;
+                    phoneSource = enrichment.source;
+                    phoneConfidence = enrichment.confidence;
                 }
             }
 
-            const enrichment = await performEnrichment('phone', currentLinks);
-            if (enrichment && enrichment.phone) {
-                finalPhone = enrichment.phone;
-                phoneSource = enrichment.source; // Use URL as source
-                phoneConfidence = enrichment.confidence;
+            // 3. Page Scan
+            if (finalPhone === "Not available") {
+                const PHONE_REGEX = /(?:\+?\d{1,3}[\s\. -])?\(?\d{2,4}\)?[\s\. -]?\d{3,4}[\s\. -]?\d{3,6}/g;
+                const matches = document.body.innerText.match(PHONE_REGEX);
+                if (matches) {
+                    const valid = matches.find(p => p.replace(/\D/g, '').length >= 10);
+                    if (valid) {
+                        finalPhone = valid;
+                        phoneSource = 'Intelligence Scan';
+                    }
+                }
             }
         }
-
-        const isEmailResult = type === 'email';
-        const resultUrl = isEmailResult ? (finalEmail !== results.email ? (emailSource.startsWith('http') ? emailSource : '') : '') : (finalPhone !== results.phone ? (phoneSource.startsWith('http') ? phoneSource : '') : '');
 
         setContact(prev => {
             if (!prev) return null;
+            const updatedEmail = (finalEmail && finalEmail !== 'Not available') ? finalEmail : prev.email;
+            const updatedPhone = (finalPhone && finalPhone !== 'Not available') ? finalPhone : prev.phone;
             return {
                 ...prev,
-                email: type === 'email' ? (finalEmail !== "Not available" ? finalEmail : (prev.email || "Not available")) : prev.email,
-                emails: type === 'email' ? (emails.length > 0 ? emails : prev.emails) : prev.emails,
-                phone: type === 'phone' ? (finalPhone !== "Not available" ? finalPhone : (prev.phone || "Not available")) : prev.phone,
-                phoneSource: type === 'phone' ? (phoneSource || prev.phoneSource) : prev.phoneSource,
-                phoneSourceUrl: type === 'phone' ? (resultUrl || prev.phoneSourceUrl) : prev.phoneSourceUrl,
-                phoneConfidence: type === 'phone' ? (phoneConfidence || prev.phoneConfidence) : prev.phoneConfidence,
-                emailSource: type === 'email' ? (emailSource || prev.emailSource) : prev.emailSource,
-                emailSourceUrl: type === 'email' ? (resultUrl || prev.emailSourceUrl) : prev.emailSourceUrl,
-                emailConfidence: type === 'email' ? (emailConfidence || prev.emailConfidence) : prev.emailConfidence
+                email: updatedEmail,
+                emails: emails.length > 0 ? emails : prev.emails,
+                phone: updatedPhone,
+                emailSource: emailSource || prev.emailSource,
+                emailConfidence: emailConfidence || prev.emailConfidence,
+                phoneSource: phoneSource || prev.phoneSource,
+                phoneConfidence: phoneConfidence || prev.phoneConfidence
             };
         });
 
@@ -662,9 +713,17 @@ const Sidebar: React.FC = () => {
 
     useEffect(() => {
         scrapeData();
-        const interval = setInterval(scrapeData, 2000);
-        return () => clearInterval(interval);
-    }, [contact?.linkedinUrl]); // Only re-run interval if URL changes
+        const interval = setInterval(scrapeData, 1000);
+
+        const mainObserver = new MutationObserver(() => scrapeData());
+        const mainNode = document.querySelector('main.scaffold-layout__main') || document.body;
+        mainObserver.observe(mainNode, { childList: true, subtree: true });
+
+        return () => {
+            clearInterval(interval);
+            mainObserver.disconnect();
+        };
+    }, [contact?.linkedinUrl]);
 
     useEffect(() => {
         if (isVisible) document.body.style.marginRight = '340px';
@@ -780,10 +839,9 @@ const Sidebar: React.FC = () => {
                     )}
 
                     <h3 style={{ fontSize: 16, fontWeight: '700', marginBottom: 16 }}>Contact information</h3>
-                    <div style={{ marginBottom: 20 }}>
+                    <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                             <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', margin: 0 }}>Email</p>
-                            {smtpOffline && <span style={{ fontSize: '9px', background: '#FEE2E2', color: '#B91C1C', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>SMTP OFFLINE</span>}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {contact?.emails && contact.emails.length > 0 ? (
@@ -814,24 +872,26 @@ const Sidebar: React.FC = () => {
                             )}
                         </div>
                     </div>
-                    <div>
-                        <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', marginBottom: 8 }}>Phone numbers</p>
-                        {contact?.phone && contact.phone !== 'Not available' && contact.phone !== 'Not available on LinkedIn' ? (
-                            <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>
-                                {contact.phone}{contact.phoneConfidence === 'low' ? '?' : ''}
-                                {contact.phoneSource && (
-                                    <div style={{ fontSize: '9px', color: '#0369A1', marginTop: '4px', fontWeight: '400' }}>
-                                        via {contact.phoneSource.startsWith('http') ? (
-                                            <a href={contact.phoneSource} target="_blank" rel="noopener noreferrer" style={{ color: '#0369A1', textDecoration: 'underline' }}>
-                                                {new URL(contact.phoneSource).hostname}
-                                            </a>
-                                        ) : contact.phoneSource}
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <button onClick={() => enrichData('phone')} disabled={loadingEnrich} style={{ width: '100%', padding: '12px', background: '#fff', border: '1px solid #ddd', borderRadius: '10px', fontWeight: '800' }}>{loadingEnrich ? 'Searching...' : 'Access Phone'}</button>
-                        )}
+                    <div style={{ marginTop: 20 }}>
+                        <p style={{ fontSize: 10, fontWeight: '900', color: '#777', textTransform: 'uppercase', marginBottom: 8, marginTop: 12 }}>Phone numbers</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {contact?.phone && contact.phone !== 'Not available' && contact.phone !== 'Not available on LinkedIn' ? (
+                                <div style={{ padding: '10px', background: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: 13, fontWeight: '700' }}>
+                                    {contact.phone}{contact.phoneConfidence === 'low' ? '?' : ''}
+                                    {contact.phoneSource && (
+                                        <div style={{ fontSize: '9px', color: '#0369A1', marginTop: '4px', fontWeight: '400' }}>
+                                            via {contact.phoneSource.startsWith('http') ? (
+                                                <a href={contact.phoneSource} target="_blank" rel="noopener noreferrer" style={{ color: '#0369A1', textDecoration: 'underline' }} onClick={(e) => { e.stopPropagation(); }}>
+                                                    {new URL(contact.phoneSource).hostname}
+                                                </a>
+                                            ) : contact.phoneSource}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <button onClick={() => enrichData('phone')} disabled={loadingEnrich} style={{ width: '100%', padding: '12px', background: '#fff', border: '1px solid #ddd', borderRadius: '10px', fontWeight: '800', cursor: 'pointer' }}>{loadingEnrich ? 'Searching...' : 'Access Phone'}</button>
+                            )}
+                        </div>
                     </div>
                 </div>
 

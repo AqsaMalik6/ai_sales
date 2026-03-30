@@ -71,7 +71,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             sendResponse({ domain });
                             return;
                         }
-                    } catch (e) {}
+                    } catch (e) { }
                 }
                 sendResponse({ domain: null });
             })
@@ -88,7 +88,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 try {
                     const res = await fetch(`http://${host}:8001/verify`, { method: 'OPTIONS' });
                     if (res.ok || res.status === 200) return true;
-                } catch (e) {}
+                } catch (e) { }
             }
             return false;
         };
@@ -114,11 +114,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const isDashboard = tab.url && (tab.url.includes('localhost:3000') || tab.url.includes('127.0.0.1:3000'));
                 const isLinkedIn = tab.url && tab.url.includes('linkedin.com/in/');
                 if (tab.id && (isDashboard || isLinkedIn)) {
-                    chrome.tabs.sendMessage(tab.id, { action: 'SYNC_FROM_EXTENSION', data: request.data }).catch(() => {});
+                    chrome.tabs.sendMessage(tab.id, { action: 'SYNC_FROM_EXTENSION', data: request.data }).catch(() => { });
                 }
             });
         });
         sendResponse({ success: true });
         return true;
     }
+    /* 
+    if (request.action === 'FETCH_RAPID_API') {
+        const username = request.username;
+        const url = `https://fresh-linkedin-scraper-api.p.rapidapi.com/api/v1/user/contact?username=${username}`;
+        console.log('[Background] Fetching RapidAPI for:', username, url);
+
+        fetch(url, {
+            method: 'GET',
+            headers: {
+                'X-RapidAPI-Key': '7e5376842bmshf82aea835cd12a8p1a649ajsn76576d8a5dcc',
+                'X-RapidAPI-Host': 'fresh-linkedin-scraper-api.p.rapidapi.com'
+            }
+        })
+            .then(res => {
+                console.log('[Background] RapidAPI HTTP Status:', res.status);
+                return res.json();
+            })
+            .then(data => {
+                console.log('[Background] RapidAPI Full JSON Response:\n', JSON.stringify(data, null, 2));
+                sendResponse({ success: true, data });
+            })
+            .catch(err => {
+                console.error('[Background] RapidAPI Error:', err);
+                sendResponse({ success: false, error: err.message });
+            });
+        return true;
+    }
+    */
 });
