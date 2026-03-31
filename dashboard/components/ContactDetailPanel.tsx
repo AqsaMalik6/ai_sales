@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState } from 'react'
-import { X, Mail, Phone, Linkedin, Globe, Calendar, Briefcase, MapPin, ExternalLink, Plus, Send, MoreHorizontal, ChevronDown, Users } from 'lucide-react'
+import React from 'react'
+import { X, Mail, Phone, Briefcase, MapPin, ChevronRight, User, GraduationCap, Sparkles } from 'lucide-react'
 import { Contact } from '@/lib/api'
 
 interface Props {
@@ -10,8 +10,6 @@ interface Props {
 }
 
 export default function ContactDetailPanel({ contact, onClose }: Props) {
-    const [activeTab, setActiveTab] = useState<'About' | 'New prospects' | 'Existing contacts'>('About')
-
     if (!contact) return null
 
     const initials = contact.full_name
@@ -23,167 +21,199 @@ export default function ContactDetailPanel({ contact, onClose }: Props) {
         : '?'
 
     return (
-        <div className="fixed inset-y-0 right-0 w-[1000px] bg-[#111827] shadow-2xl z-50 transform border-l border-border transition-transform duration-300 ease-in-out flex flex-col overflow-hidden">
-            {/* Top Header Barra */}
-            <div className="flex items-center justify-between p-6 bg-[#111827] border-b border-border">
-                <div className="flex items-center gap-2 text-xs text-secondary font-bold">
-                    <span className="hover:text-primary cursor-pointer">People</span>
-                    <span>&gt;</span>
-                    <span className="text-secondary/60">{contact.full_name}</span>
+        <div className="fixed inset-0 w-full z-50 flex flex-col overflow-hidden bg-[#0A0F1A] text-slate-200">
+            {/* Ambient Background Effects */}
+            <div className="absolute top-0 left-[-20%] w-[600px] h-[600px] bg-indigo-600/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
+
+            {/* Top Navigation Bar */}
+            <div className="relative flex items-center justify-between px-8 py-5 border-b border-white/5 bg-[#0B1220]/80 backdrop-blur-xl z-20 shadow-sm">
+                <div className="flex items-center gap-3 text-sm font-medium text-slate-400">
+                    <span className="hover:text-white cursor-pointer transition-colors px-3 py-1.5 rounded-md hover:bg-white/5">People</span>
+                    <ChevronRight className="w-4 h-4 text-slate-600" />
+                    <span className="text-white bg-white/5 px-3 py-1.5 rounded-md">{contact.full_name}</span>
                 </div>
-                <button onClick={onClose} className="p-2 hover:bg-border rounded-full transition-colors">
-                    <X className="w-5 h-5 text-secondary" />
+                <button 
+                    onClick={onClose} 
+                    className="p-2.5 bg-white/5 hover:bg-white/10 rounded-full transition-all group border border-white/5 hover:border-white/20"
+                >
+                    <X className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" />
                 </button>
             </div>
 
-            <div className="flex-1 flex overflow-hidden">
-                {/* Left Side Info Panel (Apollo Style) */}
-                <div className="w-[380px] border-r border-border p-8 overflow-y-auto space-y-8 bg-[#111827]">
-                    <div className="space-y-4">
-                        <div className="flex items-start gap-4">
-                            <div className="w-16 h-16 bg-[#374151] rounded-lg flex items-center justify-center text-primary text-2xl font-bold border border-border overflow-hidden">
-                                {contact.profile_photo_url ? (
-                                    <img src={contact.profile_photo_url} alt="" className="w-full h-full object-cover" />
-                                ) : initials}
+            <div className="relative flex-1 flex overflow-hidden z-10">
+                {/* Left Sidebar - Profile & Contact */}
+                <div className="w-[420px] bg-[#0E1526]/80 backdrop-blur-md flex flex-col h-full shadow-2xl z-20 overflow-y-auto custom-scrollbar relative">
+                    <div className="absolute inset-y-0 right-0 w-px bg-white/5 z-30" />
+                    
+                    {/* Header Details */}
+                    <div className="p-8 pb-4">
+                        <div className="flex flex-col gap-6">
+                            {/* Avatar with gradient border */}
+                            <div className="relative w-24 h-24 rounded-2xl p-[2px] bg-gradient-to-br from-indigo-500 via-blue-500 to-purple-600 shadow-xl shadow-indigo-500/20">
+                                <div className="w-full h-full bg-[#1A233A] rounded-2xl flex items-center justify-center text-3xl font-bold text-white overflow-hidden">
+                                    {contact.profile_photo_url ? (
+                                        <img src={contact.profile_photo_url} alt={contact.full_name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="bg-clip-text text-transparent bg-gradient-to-br from-white to-slate-400">
+                                            {initials}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
+                            
                             <div>
-                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                <h1 className="text-3xl font-bold tracking-tight text-white mb-2 leading-tight">
                                     {contact.full_name}
-                                    <Briefcase className="w-4 h-4 text-secondary/60" />
-                                </h2>
-                                <p className="text-secondary text-sm font-medium mt-1 leading-snug">
-                                    {contact.job_title} at <span className="text-accent underline cursor-pointer">{contact.company}</span>
-                                </p>
-                                <p className="text-secondary/60 text-xs mt-2 flex items-center gap-1">
-                                    <MapPin className="w-3 h-3" /> {contact.location || 'Not specified'}
-                                </p>
+                                </h1>
+                                <div className="flex flex-col gap-2">
+                                    <p className="text-slate-300 text-[15px] font-medium leading-relaxed">
+                                        {contact.job_title} at <span className="text-indigo-400 hover:text-indigo-300 cursor-pointer font-semibold underline decoration-indigo-400/30 underline-offset-4">{contact.company}</span>
+                                    </p>
+                                    {contact.location && (
+                                        <div className="mt-2 inline-flex items-center gap-1.5 bg-white/5 border border-white/5 w-fit px-3 py-1.5 rounded-full text-xs font-semibold text-slate-400 tracking-wide">
+                                            <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+                                            {contact.location}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-
-                        <div className="flex items-center gap-3 pt-4 border-t border-border/10">
-                            <button className="p-2 border border-border rounded-lg text-secondary hover:text-primary transition-colors">
-                                <MoreHorizontal className="w-4 h-4" />
-                            </button>
-                            <button className="p-2 border border-border rounded-lg text-secondary hover:text-primary transition-colors">
-                                <Phone className="w-4 h-4" />
-                            </button>
-                            <button className="p-2 border border-border rounded-lg text-secondary hover:text-primary transition-colors">
-                                <Mail className="w-4 h-4" />
-                            </button>
-                            <button className="flex-1 bg-[#1F2937] border border-border hover:bg-border px-3 py-2 rounded-lg text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center justify-center gap-2">
-                                <Plus className="w-3 h-3" /> Add to list
-                            </button>
-                            <button className="flex-1 bg-[#FACC15] hover:bg-[#EAB308] px-3 py-2 rounded-lg text-[11px] font-bold text-black uppercase tracking-wider flex items-center justify-center gap-2">
-                                <Send className="w-3 h-3" /> Add to sequence
-                            </button>
                         </div>
                     </div>
 
-                    <div className="space-y-6">
-                        <div>
-                            <div className="flex items-center justify-between group cursor-pointer">
-                                <h3 className="text-[11px] font-bold text-secondary uppercase tracking-widest flex items-center gap-2">
-                                    <span className="w-1 h-1 bg-accent rounded-full"></span> Contact information
-                                </h3>
-                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Plus className="w-3 h-3 text-secondary" />
-                                    <ChevronDown className="w-3 h-3 text-secondary" />
-                                </div>
-                            </div>
+                    <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mx-8 my-4" />
 
-                            <div className="mt-4 space-y-4">
-                                <div className="flex flex-col gap-1">
-                                    <span className="text-[10px] text-secondary/50 font-bold uppercase">Email</span>
-                                    <div className="flex items-center justify-between p-3 bg-[#1F2937] border border-border rounded-xl">
-                                        <div className="flex items-center gap-3 overflow-hidden">
-                                            <div className="w-2 h-2 rounded-full bg-success"></div>
-                                            <span className="text-sm font-medium truncate">{contact.email || 'N/A'}</span>
-                                        </div>
-                                        <span className="text-[10px] bg-border px-1.5 py-0.5 rounded text-secondary/70 font-bold uppercase">Primary</span>
-                                    </div>
-                                    <span className="text-[10px] text-secondary/40 mt-1">Source: {contact.email_source || 'Advanced Scraper'}</span>
-                                </div>
-
-                                <div className="flex flex-col gap-1">
-                                    <span className="text-[10px] text-secondary/50 font-bold uppercase">Phone numbers</span>
-                                    <div className="flex items-center justify-between p-3 bg-[#1F2937] border border-border rounded-xl">
-                                        <div className="flex items-center gap-3 overflow-hidden">
-                                            <div className="w-2.5 h-2.5 text-secondary/40"><Phone className="w-full h-full" /></div>
-                                            <span className="text-sm font-medium">{contact.phone || 'N/A'}</span>
-                                        </div>
-                                        <span className="text-[10px] bg-border px-1.5 py-0.5 rounded text-secondary/70 font-bold uppercase">Default</span>
-                                    </div>
-                                    <span className="text-[10px] text-secondary/40 mt-1">Source: Advanced Scraper</span>
-                                </div>
-                            </div>
-                        </div>
+                    {/* Contact Information Cards */}
+                    <div className="px-8 pb-8 space-y-6">
+                        <h3 className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
+                            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]"></span>
+                            Contact Evidence
+                        </h3>
 
                         <div className="space-y-4">
-                            <h3 className="text-[11px] font-bold text-secondary uppercase tracking-widest flex items-center gap-2">
-                                <MapPin className="w-3 h-3" /> Location
-                            </h3>
-                            <div className="p-4 border border-border rounded-xl bg-card/10">
-                                <span className="text-sm font-medium">{contact.location || 'Not specified'}</span>
+                            {/* Email Card */}
+                            <div className="group relative p-4 bg-white/[0.02] border border-white/10 rounded-2xl hover:bg-white/[0.04] hover:border-indigo-500/30 transition-all duration-300 overflow-hidden cursor-default shadow-lg shadow-black/20">
+                                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="relative flex items-start gap-4">
+                                    <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
+                                        <Mail className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex-1 overflow-hidden pt-0.5">
+                                        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Email Address</p>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-[15px] font-semibold text-white truncate">{contact.email || 'Not Discovered'}</p>
+                                            {contact.email && (
+                                                <span className="shrink-0 text-[10px] bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-md font-bold uppercase">Valid</span>
+                                            )}
+                                        </div>
+                                        <p className="text-[11px] text-slate-500 mt-2 flex items-center gap-1">
+                                            Source: <span className="text-slate-400">{contact.email_source || 'Advanced Search'}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Phone Card */}
+                            <div className="group relative p-4 bg-white/[0.02] border border-white/10 rounded-2xl hover:bg-white/[0.04] hover:border-blue-500/30 transition-all duration-300 overflow-hidden cursor-default shadow-lg shadow-black/20">
+                                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="relative flex items-start gap-4">
+                                    <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-400">
+                                        <Phone className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex-1 overflow-hidden pt-0.5">
+                                        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Phone Number</p>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-[15px] font-semibold text-white truncate">{contact.phone || 'Not Discovered'}</p>
+                                            {contact.phone && (
+                                                <span className="shrink-0 text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md font-bold uppercase">Direct</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Right Side Content Panel */}
-                <div className="flex-1 flex flex-col bg-[#111827] overflow-hidden">
-                    {/* Tabs */}
-                    <div className="px-8 pt-6 border-b border-border flex gap-8 whitespace-nowrap overflow-x-auto">
-                        {['About', 'New prospects', 'Existing contacts'].map(tab => (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab as any)}
-                                className={`pb-4 text-[13px] font-bold transition-all relative ${activeTab === tab ? 'text-accent' : 'text-secondary/60 hover:text-primary'}`}
-                            >
-                                {tab}
-                                {activeTab === tab && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent"></div>}
-                            </button>
-                        ))}
-                    </div>
+                {/* Right Content View */}
+                <div className="flex-1 overflow-y-auto relative scroll-smooth p-8 custom-scrollbar">
+                    <div className="max-w-4xl mx-auto py-4 pb-20 space-y-8">
+                        
+                        {/* Summary Section */}
+                        <div className="bg-gradient-to-b from-white/[0.03] to-transparent border border-white/5 p-8 rounded-3xl shadow-xl shadow-black/20 hover:border-white/10 transition-colors">
+                            <h3 className="text-[13px] font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-5">
+                                <User className="w-4 h-4" /> Professional Summary
+                            </h3>
+                            <p className="text-slate-300 text-[15.5px] leading-relaxed whitespace-pre-wrap font-medium">
+                                {contact.about || 'No detailed background available for this profile.'}
+                            </p>
+                        </div>
 
-                    <div className="flex-1 p-8 overflow-y-auto space-y-8 max-w-3xl">
-                        <section className="space-y-6">
-                            <div>
-                                <h3 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-4">About</h3>
-                                <p className="text-secondary/80 text-sm leading-relaxed whitespace-pre-wrap">
-                                    {contact.about || 'No description available'}
-                                </p>
+                        {/* Experience Timeline */}
+                        {contact.experience && (
+                            <div className="bg-[#121929]/80 backdrop-blur-md border border-white/5 p-8 rounded-3xl shadow-xl shadow-black/20 hover:border-indigo-500/20 transition-all duration-300 group">
+                                <h3 className="text-[13px] font-bold text-slate-400 group-hover:text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-6 transition-colors">
+                                    <Briefcase className="w-4 h-4" /> Work Experience
+                                </h3>
+                                <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap pl-5 border-l-2 border-indigo-500/20 space-y-8">
+                                    {contact.experience.split('\n\n').map((block, idx) => (
+                                        <div key={idx} className="relative">
+                                            <div className="absolute -left-[27px] top-1.5 w-3 h-3 rounded-full bg-indigo-500/50 border-2 border-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.6)]" />
+                                            <p className="text-[15px] text-slate-200">{block}</p>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
+                        )}
 
-                            {contact.experience && (
-                                <div>
-                                    <h3 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-4">Experience</h3>
-                                    <div className="text-secondary/80 text-sm leading-relaxed whitespace-pre-wrap bg-border/10 p-4 rounded-xl border border-border/20">
-                                        {contact.experience}
-                                    </div>
+                        {/* Education Section */}
+                        {contact.education && (
+                            <div className="bg-[#121929]/80 backdrop-blur-md border border-white/5 p-8 rounded-3xl shadow-xl shadow-black/20 hover:border-blue-500/20 transition-all duration-300 group">
+                                <h3 className="text-[13px] font-bold text-slate-400 group-hover:text-blue-400 uppercase tracking-widest flex items-center gap-2 mb-6 transition-colors">
+                                    <GraduationCap className="w-5 h-5" /> Education History
+                                </h3>
+                                <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap pl-5 border-l-2 border-blue-500/20 space-y-8">
+                                    {contact.education.split('\n\n').map((block, idx) => (
+                                        <div key={idx} className="relative">
+                                            <div className="absolute -left-[27px] top-1.5 w-3 h-3 rounded-full bg-blue-500/50 border-2 border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.6)]" />
+                                            <p className="text-[15px] text-slate-200">{block}</p>
+                                        </div>
+                                    ))}
                                 </div>
-                            )}
+                            </div>
+                        )}
 
-                            {contact.education && (
-                                <div>
-                                    <h3 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-4">Education</h3>
-                                    <div className="text-secondary/80 text-sm leading-relaxed whitespace-pre-wrap bg-border/10 p-4 rounded-xl border border-border/20">
-                                        {contact.education}
-                                    </div>
+                        {/* Services Section */}
+                        {contact.services && (
+                            <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 border border-indigo-500/10 p-8 rounded-3xl shadow-xl shadow-black/20">
+                                <h3 className="text-[13px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2 mb-5">
+                                    <Sparkles className="w-4 h-4" /> Featured Services
+                                </h3>
+                                <div className="text-slate-200 text-[15px] leading-relaxed py-2 font-medium">
+                                    {contact.services}
                                 </div>
-                            )}
-
-                            {contact.services && (
-                                <div>
-                                    <h3 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-4">Services</h3>
-                                    <div className="text-secondary/80 text-sm leading-relaxed bg-accent/5 p-4 rounded-xl border border-accent/20">
-                                        {contact.services}
-                                    </div>
-                                </div>
-                            )}
-                        </section>
+                            </div>
+                        )}
+                        
                     </div>
                 </div>
             </div>
+
+            <style dangerouslySetInnerHTML={{__html: `
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background-color: rgba(255, 255, 255, 0.1);
+                    border-radius: 20px;
+                }
+                .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+                    background-color: rgba(255, 255, 255, 0.2);
+                }
+            `}} />
         </div>
     )
 }
