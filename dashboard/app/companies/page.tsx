@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getCompanies, Company } from '@/lib/api'
-import { Search, Building2, Users, MapPin, ExternalLink, ArrowRight, Globe } from 'lucide-react'
+import { Search, Building2, Users, MapPin, ExternalLink, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 
 export default function CompaniesPage() {
@@ -81,13 +81,6 @@ export default function CompaniesPage() {
                                         <span>Location</span>
                                     </div>
                                     <span className="font-medium">{company.location || 'Maharashtra, India'}</span>
-                                </div>
-                                <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center gap-2 text-secondary">
-                                        <Globe className="w-4 h-4 opacity-50" />
-                                        <span>Website</span>
-                                    </div>
-                                    <span className="font-medium text-accent/80 hover:underline truncate max-w-[150px]">{company.website || company.name.toLowerCase() + '.com'}</span>
                                 </div>
                             </div>
                         </Link>
