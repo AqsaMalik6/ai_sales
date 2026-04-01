@@ -87,7 +87,7 @@ export default function ListsPage() {
                                     </div>
                                 </td>
                                 <td className="px-6 py-4 text-secondary">
-                                    {new Date(list.updated_at).toLocaleDateString()}
+                                    {new Date(list.created_at).toLocaleDateString()}
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <button 
