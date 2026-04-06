@@ -15,7 +15,7 @@ export default function ListsPage() {
 
     const handleDeleteList = async (name: string) => {
         if (!confirm(`Are you sure you want to delete the list "${name}"? Contacts will not be deleted.`)) return
-        
+
         const res = await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(name)}`, {
             method: 'DELETE'
         })
@@ -24,7 +24,7 @@ export default function ListsPage() {
         }
     }
 
-    const filteredLists = lists.filter(l => 
+    const filteredLists = lists.filter(l =>
         l.name.toLowerCase().includes(search.toLowerCase())
     )
 
@@ -64,7 +64,7 @@ export default function ListsPage() {
                         {filteredLists.length > 0 ? filteredLists.map((list) => (
                             <tr key={list.id} className="hover:bg-[#1a2333] transition-colors group">
                                 <td className="px-6 py-4">
-                                    <Link 
+                                    <Link
                                         href={`/people?list=${encodeURIComponent(list.name)}`}
                                         className="flex items-center gap-3 font-semibold text-primary hover:text-accent transition-colors"
                                     >
@@ -90,7 +90,7 @@ export default function ListsPage() {
                                     {new Date(list.created_at).toLocaleDateString()}
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                    <button 
+                                    <button
                                         onClick={() => handleDeleteList(list.name)}
                                         className="p-2 text-secondary hover:text-error hover:bg-error/10 rounded-lg transition-all"
                                     >

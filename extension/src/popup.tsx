@@ -3,12 +3,12 @@ import { createRoot } from 'react-dom/client';
 
 export default function Popup() {
     return (
-        <div style={{ 
-            width: '320px', 
-            padding: '24px', 
-            background: '#0F172A', 
-            color: 'white', 
-            fontFamily: 'Inter, system-ui, sans-serif' 
+        <div style={{
+            width: '320px',
+            padding: '24px',
+            background: '#0F172A',
+            color: 'white',
+            fontFamily: 'Inter, system-ui, sans-serif'
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
                 <div style={{ width: '8px', height: '8px', background: '#38BDF8', borderRadius: '50%' }}></div>
@@ -16,10 +16,10 @@ export default function Popup() {
             </div>
 
             <p style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '8px' }}>PROSPECTING STATUS</p>
-            <div style={{ 
-                background: '#1E293B', 
-                padding: '16px', 
-                borderRadius: '12px', 
+            <div style={{
+                background: '#1E293B',
+                padding: '16px',
+                borderRadius: '12px',
                 border: '1px solid #334155',
                 marginBottom: '24px'
             }}>
@@ -28,16 +28,16 @@ export default function Popup() {
                 </p>
             </div>
 
-            <button 
+            <button
                 onClick={() => window.open('http://localhost:3000')}
-                style={{ 
-                    width: '100%', 
-                    padding: '12px', 
-                    background: '#2563EB', 
-                    color: 'white', 
-                    border: 'none', 
-                    borderRadius: '8px', 
-                    fontWeight: '600', 
+                style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#2563EB',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: '600',
                     cursor: 'pointer',
                     fontSize: '14px',
                     marginBottom: '16px'

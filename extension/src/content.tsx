@@ -789,6 +789,32 @@ const Sidebar: React.FC = () => {
         return () => observer.disconnect();
     }, [contact, loadingEnrich]);
 
+    // ✱ DUPLICATE DETECTION LOGIC ✱
+    useEffect(() => {
+        if (!contact?.linkedinUrl || contact.fullName === 'Scanning...') {
+            setIsSaved(false);
+            return;
+        }
+
+        const checkSavedStatus = () => {
+            const currentUrl = getNormalizedUrl(contact.linkedinUrl);
+            chrome.storage.local.get(['contacts'], (result) => {
+                const existingContacts = result.contacts || [];
+                const isDuplicate = existingContacts.some((c: any) => {
+                    const existingUrl = getNormalizedUrl(c.linkedin_url || '');
+                    return existingUrl === currentUrl || (c.full_name === contact.fullName && contact.fullName !== 'Scanning...');
+                });
+                setIsSaved(isDuplicate);
+            });
+        };
+
+        checkSavedStatus();
+        const storageListener = (changes: any) => { if (changes.contacts) checkSavedStatus(); };
+        chrome.storage.onChanged.addListener(storageListener);
+        return () => chrome.storage.onChanged.removeListener(storageListener);
+    }, [contact?.linkedinUrl, contact?.fullName]);
+
+
     return (
         <>
             {!isVisible && (
@@ -813,6 +839,11 @@ const Sidebar: React.FC = () => {
 
                 <div style={{ padding: '24px 16px', flex: 1, overflowY: 'auto' }}>
                     <div style={{ marginBottom: 12, textAlign: 'center' }}>
+                        {isSaved && (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#DCFCE7', color: '#166534', padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '800', marginBottom: '14px', border: '1px solid #BBF7D0', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                                <span style={{ marginRight: '6px' }}>✓</span> Already Saved
+                            </div>
+                        )}
                         <h2 style={{ fontSize: 22, fontWeight: '800', margin: '0', color: '#111' }}>{contact?.fullName || 'Scanning...'}</h2>
                     </div>
 

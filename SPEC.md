@@ -132,7 +132,7 @@ A browser dashboard (running at `http://localhost:3000`) that visualizes contact
 
 **Features:**
 - Search by name/title/company
-- Sort by name, job title, or company
+- Sort by name or company
 - Click a row to open the **Contact Detail Panel**
 
 **Contact Detail Panel:**
@@ -140,7 +140,6 @@ A browser dashboard (running at `http://localhost:3000`) that visualizes contact
 - Displays:
   - Name, title, company, location
   - Email / phone with source labels
-  - “Add to list” and “Add to sequence” action buttons (UI only)
   - About, experience, education, services
 
 ### Companies Page (`/companies`)
@@ -162,7 +161,7 @@ A browser dashboard (running at `http://localhost:3000`) that visualizes contact
 **Features:**
 - Search lists
 - Table view with list name, contact count, created/updated timestamps
-- Delete list action (currently wired to call `http://localhost:8000/api/lists/{name}`)
+- Delete list action (implemented purely via local storage)
 - Clicking a list filters the People page by that list (`/people?list=...`)
 
 ---
@@ -192,7 +191,7 @@ A browser dashboard (running at `http://localhost:3000`) that visualizes contact
 
 - The extension currently embeds the sidebar via React `createRoot` into the page’s DOM and sets a fixed `margin-right` on `document.body` while visible.
 - The “Save Contact” workflow is local-storage-first; there is no requirement for a running backend.
-- Some dashboard code (Lists page delete action) still calls `http://localhost:8000` — this endpoint is only functional if a backend is running.
+- All dashboard code, including delete actions, operates purely via local storage. There are no backend calls.
 - Enrichment is intended to be robust to LinkedIn DOM changes via multiple selector fallbacks, but LinkedIn can still break scraping.
 
 ---
@@ -203,7 +202,7 @@ A browser dashboard (running at `http://localhost:3000`) that visualizes contact
 |---|---|---|
 | Page background | `#111827` | All pages |
 | Card / table row | `#1f2937` | Panels, alternating rows |
-| Border | `#374151` | Dividers |
+| Border | `#374151` | Divisders |
 | Text primary | `#f9fafb` | Names, headings |
 | Text secondary | `#9ca3af` | Labels, metadata |
 | Accent | `#22c55e` | Success / active states |

@@ -5,6 +5,7 @@ import { getContacts, Contact } from '@/lib/api'
 import { Search, ChevronDown, ChevronUp, Linkedin, MoreHorizontal, Mail, Phone, MapPin } from 'lucide-react'
 import ContactDetailPanel from '@/components/ContactDetailPanel'
 import { useSearchParams } from 'next/navigation'
+import * as XLSX from 'xlsx'
 
 export default function PeoplePage() {
     const [contacts, setContacts] = useState<Contact[]>([])
@@ -53,6 +54,33 @@ export default function PeoplePage() {
             })
     }, [contacts, search, sortField, sortOrder, listFilter])
 
+    const handleExport = () => {
+        if (filteredAndSortedContacts.length === 0) return;
+        
+        // Prepare data for export
+        const dataToExport = filteredAndSortedContacts.map(contact => ({
+            'Full Name': contact.full_name,
+            'Job Title': contact.job_title || 'N/A',
+            'Company': contact.company || 'N/A',
+            'Email': contact.email || 'Not available',
+            'Phone': contact.phone || 'Not available',
+            'Location': contact.location || 'Not specified',
+            'LinkedIn URL': contact.linkedin_url,
+            'Headline': contact.headline || '',
+            'About': contact.about || '',
+            'List': contact.lists?.map(l => l.name).join(', ') || 'General',
+            'Date Added': contact.date_added ? new Date(contact.date_added).toLocaleDateString() : ''
+        }));
+
+        // Create workbook and worksheet
+        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Contacts');
+
+        // Download the file
+        XLSX.writeFile(workbook, `LinkedIn_Contacts_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     return (
         <div className="p-0 bg-[#111827] min-h-screen text-primary">
             {/* Header Area */}
@@ -75,7 +103,10 @@ export default function PeoplePage() {
                                 onChange={(e) => setSearch(e.target.value)}
                             />
                         </div>
-                        <button className="bg-cta hover:bg-cta/90 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                        <button 
+                            onClick={handleExport}
+                            className="bg-cta hover:bg-cta/90 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
+                        >
                             Export
                         </button>
                     </div>
